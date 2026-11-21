@@ -239,11 +239,16 @@ struct FilterPreset: Identifiable, Equatable {
 }
 
 protocol LUTLoading {
-    func colorCube(named name: String) throws -> CIColorCube
+    func load(named name: String) throws -> LUTData
+}
+
+struct LUTData {
+    let dimension: Int
+    let data: Data   // Float32 RGBA，索引顺序 r 最慢、b 最快
 }
 ```
 
-`LUTLoader` 读取 32³ 的 PNG 立方体图，缓存为 `CIColorCube`，使用 `CIColorCubeWithColorSpace` 应用到 sRGB 工作空间。
+`LUTLoader` 读取 32³ 的 PNG 立方体图，转成 Float32 数据并缓存，使用 `CIColorCubeWithColorSpace` 应用到 sRGB 工作空间。
 
 ### 5.2 贴纸生成
 

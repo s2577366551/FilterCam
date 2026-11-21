@@ -42,7 +42,7 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
             to: drawable.texture,
             commandBuffer: nil,
             bounds: bounds,
-            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
         )
     }
 }

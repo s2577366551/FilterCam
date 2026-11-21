@@ -41,14 +41,14 @@ final class CoreImagePipeline: FilterPipeline {
     }
 
     private func applyLUT(_ image: CIImage, name: String) -> CIImage {
-        guard let cube = try? lutLoader.colorCube(named: name) else {
+        guard let lut = try? lutLoader.load(named: name) else {
             Log.filter.error("LUT 加载失败: \(name)")
             return image
         }
         let filter = CIFilter.colorCubeWithColorSpace()
         filter.inputImage = image
-        filter.cubeDimension = Float(LUTLoader.dimension)
-        filter.cubeData = cube.cubeData
+        filter.cubeDimension = Float(lut.dimension)
+        filter.cubeData = lut.data
         filter.colorSpace = colorSpace
         return filter.outputImage ?? image
     }

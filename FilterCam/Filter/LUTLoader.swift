@@ -7,8 +7,13 @@ enum LUTError: Error, Equatable {
     case invalidData(String)
 }
 
+struct LUTData {
+    let dimension: Int
+    let data: Data
+}
+
 protocol LUTLoading {
-    func colorCube(named name: String) throws -> CIColorCube
+    func load(named name: String) throws -> LUTData
 }
 
 final class LUTLoader: LUTLoading {
@@ -18,10 +23,10 @@ final class LUTLoader: LUTLoading {
         .workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB) as Any
     ])
 
-    private var cache: [String: CIColorCube] = [:]
+    private var cache: [String: LUTData] = [:]
     private let lock = NSLock()
 
-    func colorCube(named name: String) throws -> CIColorCube {
+    func load(named name: String) throws -> LUTData {
         lock.lock()
         defer { lock.unlock() }
 
@@ -44,11 +49,9 @@ final class LUTLoader: LUTLoading {
         }
 
         let data = try Self.makeCubeData(from: cgImage, name: name)
-        let cube = CIColorCube()
-        cube.dimension = Float(LUTLoader.dimension)
-        cube.cubeData = data
-        cache[name] = cube
-        return cube
+        let lut = LUTData(dimension: LUTLoader.dimension, data: data)
+        cache[name] = lut
+        return lut
     }
 
     private static func makeCubeData(from image: CGImage, name: String) throws -> Data {

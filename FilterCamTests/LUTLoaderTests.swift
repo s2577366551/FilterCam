@@ -8,10 +8,10 @@ final class LUTLoaderTests: XCTestCase {
         let names = PresetCatalog.all.compactMap(\.lutName)
         XCTAssertEqual(names.count, 42)
         for name in names {
-            let cube = try loader.colorCube(named: name)
-            XCTAssertEqual(cube.dimension, 32, "\(name) 维度错误")
+            let lut = try loader.load(named: name)
+            XCTAssertEqual(lut.dimension, 32, "\(name) 维度错误")
             XCTAssertEqual(
-                cube.cubeData?.count,
+                lut.data.count,
                 32 * 32 * 32 * 4 * 4,
                 "\(name) 数据长度错误"
             )
@@ -20,15 +20,15 @@ final class LUTLoaderTests: XCTestCase {
 
     func testMissingResourceThrows() {
         let loader = LUTLoader()
-        XCTAssertThrowsError(try loader.colorCube(named: "does_not_exist")) { error in
+        XCTAssertThrowsError(try loader.load(named: "does_not_exist")) { error in
             XCTAssertEqual(error as? LUTError, .missingResource("does_not_exist"))
         }
     }
 
-    func testCacheReturnsEquivalentCube() throws {
+    func testCacheReturnsEquivalentData() throws {
         let loader = LUTLoader()
-        let first = try loader.colorCube(named: "sim_chrome")
-        let second = try loader.colorCube(named: "sim_chrome")
-        XCTAssertEqual(first.cubeData, second.cubeData)
+        let first = try loader.load(named: "sim_chrome")
+        let second = try loader.load(named: "sim_chrome")
+        XCTAssertEqual(first.data, second.data)
     }
 }
