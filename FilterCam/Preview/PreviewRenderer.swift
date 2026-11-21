@@ -4,6 +4,7 @@ import MetalKit
 final class PreviewRenderer: NSObject, MTKViewDelegate {
     let device: MTLDevice
     private let context: CIContext
+    private let commandQueue: MTLCommandQueue?
     private let lock = NSLock()
     private var latest: CIImage?
 
@@ -11,6 +12,7 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
 
     init(device: MTLDevice) {
         self.device = device
+        self.commandQueue = device.makeCommandQueue()
         self.context = CIContext(mtlDevice: device, options: [
             .workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB) as Any,
             .cacheIntermediates: false
@@ -28,7 +30,10 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
-        guard let drawable = view.currentDrawable else { return }
+        guard let drawable = view.currentDrawable,
+              let commandBuffer = commandQueue?.makeCommandBuffer() else {
+            return
+        }
         lock.lock()
         let image = latest
         lock.unlock()
@@ -40,9 +45,11 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
         context.render(
             output,
             to: drawable.texture,
-            commandBuffer: nil,
+            commandBuffer: commandBuffer,
             bounds: bounds,
             colorSpace: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
         )
+        commandBuffer.present(drawable)
+        commandBuffer.commit()
     }
 }
