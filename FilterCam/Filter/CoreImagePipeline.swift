@@ -2,13 +2,17 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 
 final class CoreImagePipeline: FilterPipeline {
-    private let lutLoader: LUTLoading
+    private let resolver: LUTResolving
     private let context: CIContext
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)
 
-    init(lutLoader: LUTLoading, context: CIContext) {
-        self.lutLoader = lutLoader
+    init(lutResolver: LUTResolving, context: CIContext) {
+        self.resolver = lutResolver
         self.context = context
+    }
+
+    convenience init(lutLoader: LUTLoading, context: CIContext) {
+        self.init(lutResolver: BundledLUTResolver(loader: lutLoader), context: context)
     }
 
     func process(
@@ -18,12 +22,12 @@ final class CoreImagePipeline: FilterPipeline {
         adjustments: FilterAdjustments
     ) -> CIImage {
         let clamped = min(max(intensity, 0), 1)
-        guard let lutName = preset.lutName, clamped > 0 else {
+        guard preset.hasLUT, clamped > 0 else {
             return image
         }
 
         let safe = adjustments.clamped()
-        var output = applyLUT(image, name: lutName)
+        var output = applyLUT(image, preset: preset)
         output = applyAdjustments(output, adjustments: safe)
         output = applyVignette(output, amount: preset.vignette)
         let grain = min(max(preset.grain + safe.grain * 0.3, 0), 1)
@@ -40,9 +44,9 @@ final class CoreImagePipeline: FilterPipeline {
         return (dissolve.outputImage ?? output).cropped(to: image.extent)
     }
 
-    private func applyLUT(_ image: CIImage, name: String) -> CIImage {
-        guard let lut = try? lutLoader.load(named: name) else {
-            Log.filter.error("LUT 加载失败: \(name)")
+    private func applyLUT(_ image: CIImage, preset: FilterPreset) -> CIImage {
+        guard let lut = try? resolver.lut(for: preset) else {
+            Log.filter.error("LUT 加载失败: \(preset.id)")
             return image
         }
         let filter = CIFilter.colorCubeWithColorSpace()

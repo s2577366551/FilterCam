@@ -45,12 +45,11 @@ final class FilterStore: ObservableObject {
         defaults.set(recents, forKey: recentsKey)
     }
 
-    var stripPresets: [FilterPreset] {
+    var stripIDs: [String] {
         var ids: [String] = []
         for id in favorites + recents where !ids.contains(id) {
             ids.append(id)
         }
-        let presets = ids.compactMap { PresetCatalog.byID[$0] }
-        return [FilterPreset.original] + presets.prefix(Self.stripLimit)
+        return [FilterPreset.original.id] + Array(ids.prefix(Self.stripLimit))
     }
 }

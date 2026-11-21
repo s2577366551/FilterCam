@@ -72,6 +72,7 @@ struct CameraScreen: View {
         .sheet(isPresented: $viewModel.isLibraryPresented) {
             FilterLibraryView(
                 store: viewModel.filterStore,
+                userLUTs: viewModel.userLUTLibrary,
                 thumbnails: viewModel.thumbnails,
                 selectedID: viewModel.selectedPreset.id,
                 onSelect: { viewModel.selectPreset($0) }

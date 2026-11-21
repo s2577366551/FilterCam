@@ -57,7 +57,7 @@ final class FilterStoreTests: XCTestCase {
         for preset in PresetCatalog.all.prefix(10) {
             store.markUsed(preset.id)
         }
-        XCTAssertEqual(store.stripPresets.first, FilterPreset.original)
-        XCTAssertLessThanOrEqual(store.stripPresets.count, 7)
+        XCTAssertEqual(store.stripIDs.first, FilterPreset.original.id)
+        XCTAssertLessThanOrEqual(store.stripIDs.count, 7)
     }
 }

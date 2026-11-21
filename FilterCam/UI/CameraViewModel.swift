@@ -26,6 +26,7 @@ final class CameraViewModel: ObservableObject {
 
     let previewRenderer: PreviewRenderer?
     let filterStore: FilterStore
+    let userLUTLibrary: UserLUTLibrary
 
     private let camera: CameraServicing
     private let permission: CameraPermissionProviding
@@ -37,6 +38,7 @@ final class CameraViewModel: ObservableObject {
     private var settingsAdjustments: FilterAdjustments = .neutral
     private var didCaptureThumbnailSource = false
     private var adjustmentsByPreset: [String: FilterAdjustments] = [:]
+    private var lastFrame: CIImage?
 
     init(
         camera: CameraServicing = CameraService(),
@@ -46,7 +48,11 @@ final class CameraViewModel: ObservableObject {
         let context = CIContext(options: [
             .workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB) as Any
         ])
-        let pipeline = CoreImagePipeline(lutLoader: LUTLoader(), context: context)
+        let library = UserLUTLibrary.shared
+        let pipeline = CoreImagePipeline(
+            lutResolver: CompositeLUTResolver(bundled: LUTLoader(), user: library),
+            context: context
+        )
 
         self.camera = camera
         self.permission = permission
@@ -54,16 +60,17 @@ final class CameraViewModel: ObservableObject {
         self.filterPipeline = pipeline
         self.thumbnailService = ThumbnailService(pipeline: pipeline, context: context)
         self.filterStore = FilterStore()
+        self.userLUTLibrary = library
 
         bindCamera()
     }
 
     var stripPresets: [FilterPreset] {
-        let base = filterStore.stripPresets
-        if base.contains(selectedPreset) {
-            return base
+        var presets = filterStore.stripIDs.compactMap { resolvePreset(id: $0) }
+        if !presets.contains(selectedPreset) {
+            presets = [selectedPreset] + presets.prefix(FilterStore.stripLimit)
         }
-        return [selectedPreset] + base.prefix(FilterStore.stripLimit)
+        return presets
     }
 
     func onAppear() {
@@ -114,6 +121,7 @@ final class CameraViewModel: ObservableObject {
         applySettings()
         filterStore.markUsed(preset.id)
         Haptics.selection()
+        generateThumbnailIfNeeded(for: preset)
     }
 
     func setIntensity(_ value: Float) {
@@ -153,6 +161,9 @@ final class CameraViewModel: ObservableObject {
                 adjustments: settings.adjustments
             )
             self.previewRenderer?.submit(output)
+            self.settingsLock.lock()
+            self.lastFrame = image
+            self.settingsLock.unlock()
             self.captureThumbnailSource(from: image)
         }
         camera.onStateChange = { [weak self] runtime in
@@ -245,6 +256,32 @@ final class CameraViewModel: ObservableObject {
         guard shouldCapture else { return }
 
         thumbnailService.generate(from: image, presets: PresetCatalog.all) { [weak self] images in
+            Task { @MainActor in
+                self?.thumbnails.merge(images) { _, new in new }
+            }
+        }
+    }
+
+    private func resolvePreset(id: String) -> FilterPreset? {
+        if let preset = PresetCatalog.byID[id] {
+            return preset
+        }
+        guard id.hasPrefix("user_") else { return nil }
+        let lutID = String(id.dropFirst("user_".count))
+        guard let lut = userLUTLibrary.currentLUTs().first(where: { $0.id == lutID }) else {
+            return nil
+        }
+        return .user(lut)
+    }
+
+    private func generateThumbnailIfNeeded(for preset: FilterPreset) {
+        guard thumbnails[preset.id] == nil else { return }
+        settingsLock.lock()
+        let frame = lastFrame
+        settingsLock.unlock()
+        guard let frame else { return }
+
+        thumbnailService.generate(from: frame, presets: [preset]) { [weak self] images in
             Task { @MainActor in
                 self?.thumbnails.merge(images) { _, new in new }
             }
