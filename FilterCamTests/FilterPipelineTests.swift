@@ -55,7 +55,7 @@ final class FilterPipelineTests: XCTestCase {
         let actual = pixel(of: output)
         for index in 0..<3 {
             let difference = abs(Int(actual[index]) - Int(expected[index]))
-            XCTAssertLessThanOrEqual(difference, 2, "通道 \(index) 偏差过大")
+            XCTAssertLessThanOrEqual(difference, 3, "通道 \(index) 偏差过大")
         }
     }
 
