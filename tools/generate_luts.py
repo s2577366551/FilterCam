@@ -15,12 +15,12 @@ FILTERS = {
     # 胶片模拟
     "sim_standard": dict(exposure=0.05, contrast=1.02, saturation=1.04, temperature=0.02, gamma=1.0),
     "sim_vivid": dict(exposure=0.10, contrast=1.12, saturation=1.25, temperature=0.05),
-    "sim_soft": dict(exposure=0.08, contrast=0.92, saturation=0.92, lift=0.03, gamma=1.05),
-    "sim_chrome": dict(contrast=1.08, saturation=0.72, temperature=-0.05, shadow_tint=[-0.04, 0.02, 0.05], highlight_tint=[0.02, 0.01, -0.02]),
-    "sim_negative": dict(contrast=1.18, saturation=1.05, temperature=0.08, tint=0.05, shadow_tint=[0.05, -0.02, 0.02]),
+    "sim_soft": dict(exposure=0.08, contrast=0.84, saturation=0.86, temperature=0.22, tint=0.02, lift=0.03, gamma=1.05, highlight_tint=[0.05, 0.03, 0.0]),
+    "sim_chrome": dict(contrast=1.05, saturation=0.62, temperature=-0.08, shadow_tint=[-0.06, 0.02, 0.07], highlight_tint=[0.02, 0.02, 0.0]),
+    "sim_negative": dict(contrast=1.10, saturation=0.86, temperature=0.02, tint=0.09, shadow_tint=[0.06, -0.01, 0.05], highlight_tint=[0.03, 0.02, -0.02]),
     "sim_nostalgic": dict(contrast=1.05, saturation=0.95, temperature=0.16, lift=0.02, highlight_tint=[0.06, 0.04, -0.03]),
     "sim_cinema": dict(contrast=1.02, saturation=0.82, temperature=-0.02, lift=0.03, shadow_tint=[-0.02, 0.03, 0.02]),
-    "sim_bleach": dict(contrast=1.35, saturation=0.45, gamma=0.95),
+    "sim_bleach": dict(contrast=1.18, saturation=0.28, lift=0.02, gamma=1.0, shadow_tint=[-0.02, 0.01, 0.05]),
     "sim_mono": dict(mono=True, contrast=1.08, gamma=1.02),
     "sim_mono_red": dict(mono=True, mono_weights=[0.35, 0.55, 0.10], contrast=1.12),
 
