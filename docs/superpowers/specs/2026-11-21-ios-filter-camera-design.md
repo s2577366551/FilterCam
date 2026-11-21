@@ -23,8 +23,11 @@
 
 - 实时胶片滤镜预览（42 款滤镜 + 原图，分 5 类）
 - 滤镜强度调节（0–100%）
+- **滤镜参数微调**：曝光、对比度、色温、颗粒
 - 滤镜库：分类浏览、收藏、最近使用
 - 拍照，全分辨率套用当前滤镜
+- **胶片边框**：135 齿孔、拍立得白边、宽幅留白
+- **内置贴纸库**：取景器装饰贴纸 + 可摆放到成片上的贴纸
 - **Q 版贴纸生成**：对照片主体做动漫化、抠图、白描边，生成可摆放的贴纸
 - **贴纸编辑**：拖动、缩放、旋转、删除
 - 导出合成图到系统相册
@@ -37,7 +40,7 @@
 - 视频录制
 - 美颜（磨皮、瘦脸、美白）
 - 云端 AI 生图、文字生成贴纸
-- 边框、手写文字、完整拼贴模板系统
+- 手写文字、完整拼贴模板系统
 - 社交分享、账号、云同步
 - 除模型下载外的任何网络请求
 
@@ -203,7 +206,28 @@ FilterCam/
 ```swift
 protocol FilterPipeline {
     /// intensity 为 0...1；0 时输出与输入视觉一致，1 时为预设满强度。
-    func process(_ image: CIImage, preset: FilterPreset, intensity: Float) -> CIImage
+    func process(
+        _ image: CIImage,
+        preset: FilterPreset,
+        intensity: Float,
+        adjustments: FilterAdjustments
+    ) -> CIImage
+}
+
+extension FilterPipeline {
+    func process(_ image: CIImage, preset: FilterPreset, intensity: Float) -> CIImage {
+        process(image, preset: preset, intensity: intensity, adjustments: .neutral)
+    }
+}
+
+struct FilterAdjustments: Equatable {
+    var exposure: Float = 0     // -1...1，映射为 ±0.25 EV
+    var contrast: Float = 0     // -1...1，映射为 0.5...1.5 倍
+    var temperature: Float = 0  // -1...1，映射为 3500...9500K
+    var grain: Float = 0        // -1...1，叠加到预设颗粒上
+
+    static let neutral = FilterAdjustments()
+    var isNeutral: Bool { self == .neutral }
 }
 
 struct FilterPreset: Identifiable, Equatable {
@@ -472,6 +496,24 @@ v1 内置 **42 款滤镜 + 原图，共 43 个选项**，分 5 类。全部由 `
 - 后续拿到正版 LUT，可直接替换 PNG，不改代码。
 - 滤镜切换只换 `CIColorCube`，不影响帧率。
 
+### 8.7 滤镜参数微调
+
+在强度之外，提供四根滑杆，作用在 LUT 之后（相当于对扫描件做后期）：
+
+| 参数 | 范围 | 映射 |
+|---|---|---|
+| 曝光 | -1...1 | `CIExposureAdjust`，EV = 参数 × 0.25 |
+| 对比度 | -1...1 | `CIColorControls.contrast` = 1 + 参数 × 0.5 |
+| 色温 | -1...1 | `CITemperatureAndTint`，目标色温 6500 + 参数 × 3000 |
+| 颗粒 | -1...1 | 最终颗粒 = clamp(预设颗粒 + 参数 × 0.3, 0...1) |
+
+规则：
+
+- 参数为中性时不插入任何额外滤镜，保证与原预设输出一致。
+- 每款预设记住自己的微调值，切换滤镜时恢复。
+- 编辑页提供"重置"，一键回到中性。
+- 预览与导出使用同一套参数，避免所见非所得。
+
 ## 9. Q 版贴纸生成
 
 | 步骤 | 实现 | 失败降级 |
@@ -487,6 +529,32 @@ v1 内置 **42 款滤镜 + 原图，共 43 个选项**，分 5 类。全部由 `
 - 通过 `tools/convert_model.py` 在 CI 的 macOS 机器上转换为 `.mlpackage`，产物提交入库。
 - 模型许可证与来源记录在 `docs/superpowers/specs/model-license.md`，上架前复核。
 - 目标：iPhone 12 及以上，1024 长边推理 < 1.5 秒。
+
+### 9.5 胶片边框
+
+三种边框，导出时合成到成片外围：
+
+| id | 名称 | 结构 |
+|---|---|---|
+| `none` | 无边框 | 原始画面 |
+| `film135` | 135 齿孔 | 上下黑边 + 等距齿孔 + 底部胶片标识文字 |
+| `polaroid` | 拍立得 | 四周白边，底部留宽边 |
+| `wide` | 宽幅留白 | 上下白边，画面居中 |
+
+实现：
+
+- `FrameStyle` 枚举 + `FrameRenderer`，用 Core Graphics 程序化绘制，不依赖大图资源。
+- 输出画布尺寸 = 原图 + 边框，长边不超过 4096。
+- 边框颜色、齿孔间距、留白比例参数化，便于后续加新样式。
+- 边框在编辑页选择，实时预览缩略图，导出时按原分辨率合成。
+
+### 9.6 内置贴纸库
+
+- 随包 2 个贴纸包、共 12 张，主题为「动物」「街景杂物」。
+- 资源为透明 PNG，白边已烘焙；清单文件 `StickerPacks.json` 描述包名、分类、资源名。
+- 用途一：取景器四周装饰（可在设置中关闭）。
+- 用途二：编辑页贴纸面板，点击添加到成片，复用同一套手势。
+- 素材来源：自行绘制或 CC0，记录在 `docs/superpowers/specs/sticker-license.md`，不使用来源不明素材。
 
 ## 10. 异常与边界
 
@@ -583,9 +651,9 @@ v1 内置 **42 款滤镜 + 原图，共 43 个选项**，分 5 类。全部由 `
 |---|---|---|
 | M1 | 工程骨架、XcodeGen、CI、权限文案 | 手机装出可运行 App，CI 出 IPA |
 | M2 | 权限流程、会话、实时预览、前后切换 | 真机看到画面，切换正常 |
-| M3 | LUT 滤镜管线、42 款滤镜、强度、滤镜库与缩略图 | 实时切换流畅，色彩接近参考 |
+| M3 | LUT 滤镜管线、42 款滤镜、强度、参数微调、滤镜库与缩略图 | 实时切换流畅，色彩接近参考 |
 | M4 | 贴纸生成：模型接入、抠图、描边、降级 | 真机能生成边缘干净的贴纸 |
-| M5 | 编辑页：图层、手势、撤销、合成导出 | 贴纸可摆放并导出正确成片 |
+| M5 | 编辑页：图层、手势、撤销、边框、内置贴纸库、合成导出 | 贴纸可摆放、边框正确、导出成片 |
 | M6 | 异常处理、性能优化、图标启动图、验收 | 真机清单全过，性能达标 |
 
 ## 15. 风险

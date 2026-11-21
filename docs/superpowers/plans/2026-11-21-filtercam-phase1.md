@@ -2976,7 +2976,386 @@ git push origin main
 
 ---
 
-### Task 13: 阶段一验收与文档
+### Task 13: 滤镜参数微调
+
+**Files:**
+- Create: `FilterCam/Filter/FilterAdjustments.swift`
+- Create: `FilterCam/UI/AdjustmentPanel.swift`
+- Create: `FilterCamTests/FilterAdjustmentsTests.swift`
+- Modify: `FilterCam/Filter/FilterPipeline.swift`
+- Modify: `FilterCam/Filter/CoreImagePipeline.swift`
+- Modify: `FilterCam/UI/CameraViewModel.swift`
+- Modify: `FilterCam/UI/CameraScreen.swift`
+
+**Interfaces:**
+- Consumes: `FilterPipeline`、`FilterPreset`。
+- Produces:
+  - `struct FilterAdjustments: Equatable`，字段 `exposure`、`contrast`、`temperature`、`grain`，静态 `neutral`，`isNeutral`。
+  - `FilterPipeline.process(_:preset:intensity:adjustments:)`；三参数版本保留为默认实现。
+  - `AdjustmentPanel`，参数 `adjustments`、`onChange`、`onReset`。
+  - `CameraViewModel` 新增 `adjustments`、`setAdjustments(_:)`、`resetAdjustments()`。
+
+- [ ] **Step 1: 写失败测试**
+
+`FilterCamTests/FilterAdjustmentsTests.swift`：
+
+```swift
+import CoreImage
+import XCTest
+@testable import FilterCam
+
+final class FilterAdjustmentsTests: XCTestCase {
+    private let context = CIContext(options: [
+        .workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB) as Any
+    ])
+
+    private func solidImage() -> CIImage {
+        CIImage(color: CIColor(red: 0.4, green: 0.4, blue: 0.4, alpha: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
+    }
+
+    private func luma(_ image: CIImage) -> UInt8 {
+        var bytes = [UInt8](repeating: 0, count: 4)
+        context.render(
+            image,
+            toBitmap: &bytes,
+            rowBytes: 4,
+            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)
+        )
+        return bytes[0]
+    }
+
+    func testNeutralMatchesBaseline() {
+        let pipeline = CoreImagePipeline(lutLoader: LUTLoader(), context: context)
+        let preset = PresetCatalog.byID["sim_standard"]!
+        let baseline = pipeline.process(solidImage(), preset: preset, intensity: 1)
+        let neutral = pipeline.process(
+            solidImage(),
+            preset: preset,
+            intensity: 1,
+            adjustments: .neutral
+        )
+        XCTAssertEqual(luma(baseline), luma(neutral))
+    }
+
+    func testPositiveExposureBrightens() {
+        let pipeline = CoreImagePipeline(lutLoader: LUTLoader(), context: context)
+        let preset = PresetCatalog.byID["sim_standard"]!
+        let base = pipeline.process(solidImage(), preset: preset, intensity: 1)
+        var adjustments = FilterAdjustments.neutral
+        adjustments.exposure = 1
+        let bright = pipeline.process(
+            solidImage(),
+            preset: preset,
+            intensity: 1,
+            adjustments: adjustments
+        )
+        XCTAssertGreaterThan(luma(bright), luma(base))
+    }
+
+    func testNegativeExposureDarkens() {
+        let pipeline = CoreImagePipeline(lutLoader: LUTLoader(), context: context)
+        let preset = PresetCatalog.byID["sim_standard"]!
+        let base = pipeline.process(solidImage(), preset: preset, intensity: 1)
+        var adjustments = FilterAdjustments.neutral
+        adjustments.exposure = -1
+        let dark = pipeline.process(
+            solidImage(),
+            preset: preset,
+            intensity: 1,
+            adjustments: adjustments
+        )
+        XCTAssertLessThan(luma(dark), luma(base))
+    }
+
+    func testNeutralDetection() {
+        XCTAssertTrue(FilterAdjustments.neutral.isNeutral)
+        var adjustments = FilterAdjustments.neutral
+        adjustments.grain = 0.1
+        XCTAssertFalse(adjustments.isNeutral)
+    }
+}
+```
+
+- [ ] **Step 2: 推送确认测试失败**
+
+Run: `git push origin main`
+Expected: CI 失败，报错 `extra argument 'adjustments' in call`。
+
+- [ ] **Step 3: 写参数模型**
+
+`FilterCam/Filter/FilterAdjustments.swift`：
+
+```swift
+import Foundation
+
+struct FilterAdjustments: Equatable {
+    var exposure: Float = 0
+    var contrast: Float = 0
+    var temperature: Float = 0
+    var grain: Float = 0
+
+    static let neutral = FilterAdjustments()
+
+    var isNeutral: Bool { self == .neutral }
+
+    func clamped() -> FilterAdjustments {
+        FilterAdjustments(
+            exposure: min(max(exposure, -1), 1),
+            contrast: min(max(contrast, -1), 1),
+            temperature: min(max(temperature, -1), 1),
+            grain: min(max(grain, -1), 1)
+        )
+    }
+}
+```
+
+- [ ] **Step 4: 扩展管线协议与实现**
+
+`FilterCam/Filter/FilterPipeline.swift` 改为：
+
+```swift
+import CoreImage
+
+protocol FilterPipeline {
+    func process(
+        _ image: CIImage,
+        preset: FilterPreset,
+        intensity: Float,
+        adjustments: FilterAdjustments
+    ) -> CIImage
+}
+
+extension FilterPipeline {
+    func process(_ image: CIImage, preset: FilterPreset, intensity: Float) -> CIImage {
+        process(image, preset: preset, intensity: intensity, adjustments: .neutral)
+    }
+}
+```
+
+`FilterCam/Filter/CoreImagePipeline.swift` 修改 `process` 签名，并在 LUT 之后、暗角之前插入参数处理：
+
+```swift
+func process(
+    _ image: CIImage,
+    preset: FilterPreset,
+    intensity: Float,
+    adjustments: FilterAdjustments
+) -> CIImage {
+    let clamped = min(max(intensity, 0), 1)
+    guard let lutName = preset.lutName, clamped > 0 else {
+        return image
+    }
+
+    let safe = adjustments.clamped()
+    var output = applyLUT(image, name: lutName)
+    output = applyAdjustments(output, adjustments: safe)
+    output = applyVignette(output, amount: preset.vignette)
+    let grain = min(max(preset.grain + safe.grain * 0.3, 0), 1)
+    output = applyGrain(output, amount: grain)
+    output = output.cropped(to: image.extent)
+
+    guard clamped < 1 else { return output }
+    let dissolve = CIFilter.dissolveTransition()
+    dissolve.inputImage = image
+    dissolve.targetImage = output
+    dissolve.time = clamped
+    return (dissolve.outputImage ?? output).cropped(to: image.extent)
+}
+
+private func applyAdjustments(_ image: CIImage, adjustments: FilterAdjustments) -> CIImage {
+    guard !adjustments.isNeutral else { return image }
+    var output = image
+
+    if adjustments.exposure != 0 {
+        let filter = CIFilter.exposureAdjust()
+        filter.inputImage = output
+        filter.ev = adjustments.exposure * 0.25
+        output = filter.outputImage ?? output
+    }
+
+    if adjustments.contrast != 0 {
+        let filter = CIFilter.colorControls()
+        filter.inputImage = output
+        filter.contrast = 1 + adjustments.contrast * 0.5
+        output = filter.outputImage ?? output
+    }
+
+    if adjustments.temperature != 0 {
+        let filter = CIFilter.temperatureAndTint()
+        filter.inputImage = output
+        filter.neutral = CIVector(x: 6500, y: 0)
+        filter.targetNeutral = CIVector(
+            x: 6500 + CGFloat(adjustments.temperature) * 3000,
+            y: 0
+        )
+        output = filter.outputImage ?? output
+    }
+
+    return output.cropped(to: image.extent)
+}
+```
+
+- [ ] **Step 5: 写调节面板**
+
+`FilterCam/UI/AdjustmentPanel.swift`：
+
+```swift
+import SwiftUI
+
+struct AdjustmentPanel: View {
+    let adjustments: FilterAdjustments
+    let onChange: (FilterAdjustments) -> Void
+    let onReset: () -> Void
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text("调节")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.controlDim)
+                Spacer()
+                Button("重置", action: onReset)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.control)
+            }
+            .padding(.horizontal, 20)
+
+            row("曝光", value: adjustments.exposure) { value in
+                var next = adjustments
+                next.exposure = value
+                onChange(next)
+            }
+            row("对比", value: adjustments.contrast) { value in
+                var next = adjustments
+                next.contrast = value
+                onChange(next)
+            }
+            row("色温", value: adjustments.temperature) { value in
+                var next = adjustments
+                next.temperature = value
+                onChange(next)
+            }
+            row("颗粒", value: adjustments.grain) { value in
+                var next = adjustments
+                next.grain = value
+                onChange(next)
+            }
+        }
+    }
+
+    private func row(
+        _ title: String,
+        value: Float,
+        onChange: @escaping (Float) -> Void
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.controlDim)
+                .frame(width: 28, alignment: .leading)
+            Slider(
+                value: Binding(
+                    get: { Double(value) },
+                    set: { onChange(Float($0)) }
+                ),
+                in: -1...1
+            )
+            .tint(.white)
+        }
+        .padding(.horizontal, 20)
+    }
+}
+```
+
+- [ ] **Step 6: 接入 ViewModel 与相机页**
+
+`CameraViewModel` 新增：
+
+```swift
+@Published private(set) var adjustments: FilterAdjustments = .neutral
+
+private var adjustmentsByPreset: [String: FilterAdjustments] = [:]
+
+func setAdjustments(_ value: FilterAdjustments) {
+    adjustments = value.clamped()
+    applySettings()
+}
+
+func resetAdjustments() {
+    setAdjustments(.neutral)
+}
+```
+
+`selectPreset` 开头保存并恢复：
+
+```swift
+adjustmentsByPreset[selectedPreset.id] = adjustments
+adjustments = adjustmentsByPreset[preset.id] ?? .neutral
+```
+
+`currentSettings` 返回三元组：
+
+```swift
+private func currentSettings() -> (preset: FilterPreset, intensity: Float, adjustments: FilterAdjustments) {
+    settingsLock.lock()
+    defer { settingsLock.unlock() }
+    return (settingsPreset, settingsIntensity, settingsAdjustments)
+}
+```
+
+新增存储属性 `private var settingsAdjustments: FilterAdjustments = .neutral`，并在 `applySettings()` 中写入 `adjustments`。
+
+`onFrame` 改为：
+
+```swift
+let settings = self.currentSettings()
+let output = self.filterPipeline.process(
+    image,
+    preset: settings.preset,
+    intensity: settings.intensity,
+    adjustments: settings.adjustments
+)
+```
+
+`CameraScreen` 在强度滑杆下方插入：
+
+```swift
+if viewModel.selectedPreset.id != FilterPreset.original.id {
+    AdjustmentPanel(
+        adjustments: viewModel.adjustments,
+        onChange: viewModel.setAdjustments,
+        onReset: viewModel.resetAdjustments
+    )
+    .padding(.bottom, 6)
+}
+```
+
+- [ ] **Step 7: 推送确认测试通过**
+
+Run: `git push origin main`
+Expected: CI 绿灯。
+
+- [ ] **Step 8: 真机验证**
+
+1. 选一款滤镜，出现"调节"面板。
+2. 拖动曝光/对比/色温/颗粒，画面实时变化。
+3. 切到另一款滤镜再切回，微调值被记住。
+4. 点"重置"，四根滑杆回到中间。
+
+- [ ] **Step 9: 提交**
+
+```bash
+git add FilterCam FilterCamTests
+git commit -m "feat: 滤镜参数微调（曝光/对比/色温/颗粒）"
+git push origin main
+```
+
+---
+
+### Task 14: 阶段一验收与文档
 
 **Files:**
 - Modify: `README.md`
@@ -2996,6 +3375,8 @@ git push origin main
 | 闪光灯三态循环 | 通过 / 不通过 |
 | 42 款滤镜逐一切换 | 通过 / 不通过 |
 | 强度 0/50/100 | 通过 / 不通过 |
+| 曝光/对比/色温/颗粒微调 | 通过 / 不通过 |
+| 微调值按滤镜记忆、可重置 | 通过 / 不通过 |
 | 滤镜库 5 个分类 | 通过 / 不通过 |
 | 长按收藏、最近使用 | 通过 / 不通过 |
 | 快门提示出现 | 通过 / 不通过 |
@@ -3043,11 +3424,12 @@ Expected: `Build` 绿灯，产物可下载并安装。
 - CI 绿灯，`FilterCam-ipa` 可安装到真机。
 - 相机实时预览正常，前后切换、闪光灯三态可用。
 - 42 款滤镜可实时切换，强度可调，滤镜库按 5 类展示。
+- 曝光、对比度、色温、颗粒四根滑杆可用，微调值按滤镜记忆。
 - 收藏与最近使用可持久化。
 - 快门能成功拍摄并返回照片数据。
 - 无崩溃、无明显掉帧。
 
-阶段二（M4–M5：Q 版贴纸生成与编辑器）在阶段一验收通过后单独编写实现计划。
+阶段二（M4–M5）在阶段一验收通过后单独编写实现计划，范围包括：Q 版贴纸生成、内置贴纸库、胶片边框、编辑器与导出、胶卷相册。
 
 
 
