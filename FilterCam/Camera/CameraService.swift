@@ -1,0 +1,233 @@
+import AVFoundation
+import CoreImage
+
+final class CameraService: NSObject, CameraServicing {
+    private let session = AVCaptureSession()
+    private let sessionQueue = DispatchQueue(label: "com.filtercam.camera.session")
+    private let videoQueue = DispatchQueue(label: "com.filtercam.camera.video", qos: .userInitiated)
+    private let videoOutput = AVCaptureVideoDataOutput()
+    private let photoOutput = AVCapturePhotoOutput()
+
+    private var videoInput: AVCaptureDeviceInput?
+    private var position: AVCaptureDevice.Position = .back
+    private var flashMode: FlashMode = .auto
+    private var isConfigured = false
+    private var isObserving = false
+    private let photoLock = NSLock()
+    private var photoContinuation: CheckedContinuation<Data, Error>?
+
+    var onFrame: ((CIImage) -> Void)?
+    var onStateChange: ((CameraRuntimeState) -> Void)?
+
+    func start() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            sessionQueue.async {
+                do {
+                    try self.configureIfNeeded()
+                    self.observeSessionIfNeeded()
+                    if !self.session.isRunning {
+                        self.session.startRunning()
+                    }
+                    self.onStateChange?(.running)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    func stop() {
+        sessionQueue.async {
+            if self.session.isRunning {
+                self.session.stopRunning()
+            }
+            self.onStateChange?(.idle)
+        }
+    }
+
+    func switchCamera() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            sessionQueue.async {
+                do {
+                    try self.switchCameraLocked()
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    func setFlashMode(_ mode: FlashMode) {
+        sessionQueue.async { self.flashMode = mode }
+    }
+
+    func capturePhoto() async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            sessionQueue.async {
+                guard self.session.isRunning else {
+                    continuation.resume(throwing: CameraError.captureFailed("相机会话未运行"))
+                    return
+                }
+                self.photoLock.lock()
+                let isBusy = self.photoContinuation != nil
+                if !isBusy {
+                    self.photoContinuation = continuation
+                }
+                self.photoLock.unlock()
+                guard !isBusy else {
+                    continuation.resume(throwing: CameraError.captureFailed("上一张照片仍在处理中"))
+                    return
+                }
+
+                let settings = AVCapturePhotoSettings()
+                if self.photoOutput.supportedFlashModes.contains(self.flashMode.avMode) {
+                    settings.flashMode = self.flashMode.avMode
+                }
+                self.photoOutput.capturePhoto(with: settings, delegate: self)
+            }
+        }
+    }
+
+    private func configureIfNeeded() throws {
+        guard !isConfigured else { return }
+        session.beginConfiguration()
+        defer { session.commitConfiguration() }
+        session.sessionPreset = .hd1920x1080
+
+        guard let device = Self.device(position: position) else {
+            throw CameraError.noCameraAvailable
+        }
+        let input = try AVCaptureDeviceInput(device: device)
+        guard session.canAddInput(input) else {
+            throw CameraError.configurationFailed("无法添加相机输入")
+        }
+        session.addInput(input)
+        videoInput = input
+
+        videoOutput.alwaysDiscardsLateVideoFrames = true
+        videoOutput.videoSettings = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+        ]
+        videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
+        guard session.canAddOutput(videoOutput) else {
+            throw CameraError.configurationFailed("无法添加视频输出")
+        }
+        session.addOutput(videoOutput)
+
+        guard session.canAddOutput(photoOutput) else {
+            throw CameraError.configurationFailed("无法添加照片输出")
+        }
+        session.addOutput(photoOutput)
+
+        applyConnectionSettings(position: position)
+        isConfigured = true
+    }
+
+    private func switchCameraLocked() throws {
+        let newPosition: AVCaptureDevice.Position = position == .back ? .front : .back
+        guard let device = Self.device(position: newPosition) else {
+            throw CameraError.noCameraAvailable
+        }
+        let input = try AVCaptureDeviceInput(device: device)
+
+        session.beginConfiguration()
+        defer { session.commitConfiguration() }
+
+        let previousInput = videoInput
+        if let previousInput {
+            session.removeInput(previousInput)
+        }
+        guard session.canAddInput(input) else {
+            if let previousInput {
+                session.addInput(previousInput)
+            }
+            throw CameraError.configurationFailed("无法切换摄像头")
+        }
+        session.addInput(input)
+        videoInput = input
+        position = newPosition
+        applyConnectionSettings(position: newPosition)
+    }
+
+    private func applyConnectionSettings(position: AVCaptureDevice.Position) {
+        guard let connection = videoOutput.connection(with: .video) else { return }
+        if connection.isVideoRotationAngleSupported(90) {
+            connection.videoRotationAngle = 90
+        }
+        connection.isVideoMirrored = position == .front
+    }
+
+    private func observeSessionIfNeeded() {
+        guard !isObserving else { return }
+        isObserving = true
+        let center = NotificationCenter.default
+        center.addObserver(
+            forName: .AVCaptureSessionWasInterrupted,
+            object: session,
+            queue: .main
+        ) { [weak self] _ in
+            self?.onStateChange?(.interrupted)
+        }
+        center.addObserver(
+            forName: .AVCaptureSessionInterruptionEnded,
+            object: session,
+            queue: .main
+        ) { [weak self] _ in
+            self?.onStateChange?(.running)
+        }
+        center.addObserver(
+            forName: .AVCaptureSessionRuntimeError,
+            object: session,
+            queue: .main
+        ) { [weak self] notification in
+            let error = notification.userInfo?[AVCaptureSessionErrorKey] as? Error
+            let message = error?.localizedDescription ?? "相机运行时错误"
+            self?.onStateChange?(.failed(.configurationFailed(message)))
+        }
+    }
+
+    private static func device(position: AVCaptureDevice.Position) -> AVCaptureDevice? {
+        AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInWideAngleCamera, .builtInDualCamera, .builtInTripleCamera],
+            mediaType: .video,
+            position: position
+        ).devices.first
+    }
+}
+
+extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        onFrame?(CIImage(cvPixelBuffer: buffer))
+    }
+}
+
+extension CameraService: AVCapturePhotoCaptureDelegate {
+    func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didFinishProcessingPhoto photo: AVCapturePhoto,
+        error: Error?
+    ) {
+        let continuation: CheckedContinuation<Data, Error>?
+        photoLock.lock()
+        continuation = photoContinuation
+        photoContinuation = nil
+        photoLock.unlock()
+
+        if let error {
+            continuation?.resume(throwing: CameraError.captureFailed(error.localizedDescription))
+            return
+        }
+        guard let data = photo.fileDataRepresentation() else {
+            continuation?.resume(throwing: CameraError.captureFailed("照片数据为空"))
+            return
+        }
+        continuation?.resume(returning: data)
+    }
+}

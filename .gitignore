@@ -4,4 +4,4 @@ DerivedData/
 *.xcodeproj
 *.xcworkspace
 xcuserdata/
-FilterCam/Resources/Info.plist
+Support/Info.plist
