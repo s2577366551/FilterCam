@@ -1721,7 +1721,7 @@ Expected: 安装成功。
 
 ```python
 #!/usr/bin/env python3
-"""生成 32³ LUT。输出为 1024x32 的 PNG，像素顺序为 r 最慢、b 最快。"""
+"""生成 32³ LUT。输出为 1024x32 的 PNG，索引顺序 r 最快、b 最慢。"""
 
 import os
 import numpy as np
@@ -1829,9 +1829,11 @@ def apply_params(rgb: np.ndarray, p: dict) -> np.ndarray:
 
 def build_cube(params: dict) -> np.ndarray:
     steps = np.linspace(0.0, 1.0, SIZE)
-    r = np.repeat(steps, SIZE * SIZE)
+    # CIColorCube 的索引顺序：index = r + g*N + b*N²
+    # 因此 b 最慢、g 居中、r 最快。
+    b = np.repeat(steps, SIZE * SIZE)
     g = np.tile(np.repeat(steps, SIZE), SIZE)
-    b = np.tile(steps, SIZE * SIZE)
+    r = np.tile(steps, SIZE * SIZE)
     rgb = np.stack([r, g, b], axis=1)
     return apply_params(rgb, params)
 
@@ -2026,7 +2028,7 @@ final class LUTLoader: LUTLoading {
 }
 ```
 
-说明：`CGContext.draw` 把 PNG 顶行写入内存首行，`CIColorCube` 要求索引顺序为 r 最慢、b 最快，与生成脚本的排布一致。
+说明：`CGContext.draw` 把 PNG 顶行写入内存首行，`CIColorCube` 要求索引顺序为 r 最快、b 最慢（r + g*N + b*N²），与生成脚本的排布一致。
 
 - [ ] **Step 4: 推送确认测试通过**
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生成 32³ LUT。输出为 1024x32 的 PNG，像素顺序为 r 最慢、b 最快。"""
+"""生成 32³ LUT。输出为 1024x32 的 PNG，索引顺序 r 最快、b 最慢。"""
 
 import os
 
@@ -108,9 +108,11 @@ def apply_params(rgb: np.ndarray, p: dict) -> np.ndarray:
 
 def build_cube(params: dict) -> np.ndarray:
     steps = np.linspace(0.0, 1.0, SIZE)
-    r = np.repeat(steps, SIZE * SIZE)
+    # CIColorCube 的索引顺序：index = r + g*N + b*N²
+    # 因此 b 最慢、g 居中、r 最快。
+    b = np.repeat(steps, SIZE * SIZE)
     g = np.tile(np.repeat(steps, SIZE), SIZE)
-    b = np.tile(steps, SIZE * SIZE)
+    r = np.tile(steps, SIZE * SIZE)
     rgb = np.stack([r, g, b], axis=1)
     return apply_params(rgb, params)
 

@@ -244,7 +244,7 @@ protocol LUTLoading {
 
 struct LUTData {
     let dimension: Int
-    let data: Data   // Float32 RGBA，索引顺序 r 最慢、b 最快
+    let data: Data   // Float32 RGBA，索引顺序 r 最快、b 最慢（r + g*N + b*N²）
 }
 ```
 
