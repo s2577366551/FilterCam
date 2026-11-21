@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct PermissionGateView: View {
     let title: String

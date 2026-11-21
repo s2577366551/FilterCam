@@ -1,5 +1,6 @@
 import CoreImage
 import CoreGraphics
+import Foundation
 
 enum LUTError: Error, Equatable {
     case missingResource(String)

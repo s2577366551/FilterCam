@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct FilterStrip: View {
     let presets: [FilterPreset]
