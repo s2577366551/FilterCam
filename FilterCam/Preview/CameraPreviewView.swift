@@ -12,6 +12,7 @@ struct CameraPreviewView: UIViewRepresentable {
         view.enableSetNeedsDisplay = true
         view.delegate = renderer
         view.backgroundColor = .black
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         renderer.onNeedsDisplay = { [weak view] in
             DispatchQueue.main.async {
                 view?.setNeedsDisplay()

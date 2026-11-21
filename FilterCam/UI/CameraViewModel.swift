@@ -23,6 +23,7 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var thumbnails: [String: UIImage] = [:]
     @Published var isLibraryPresented = false
     @Published private(set) var toast: String?
+    @Published private(set) var hasReceivedFrame = false
 
     let previewRenderer: PreviewRenderer?
     let filterStore: FilterStore
@@ -37,6 +38,7 @@ final class CameraViewModel: ObservableObject {
     private var settingsIntensity: Float = 0
     private var settingsAdjustments: FilterAdjustments = .neutral
     private var didCaptureThumbnailSource = false
+    private var didReceiveFrame = false
     private var adjustmentsByPreset: [String: FilterAdjustments] = [:]
     private var lastFrame: CIImage?
 
@@ -163,7 +165,16 @@ final class CameraViewModel: ObservableObject {
             self.previewRenderer?.submit(output)
             self.settingsLock.lock()
             self.lastFrame = image
+            let isFirstFrame = !self.didReceiveFrame
+            if isFirstFrame {
+                self.didReceiveFrame = true
+            }
             self.settingsLock.unlock()
+            if isFirstFrame {
+                DispatchQueue.main.async {
+                    self.hasReceivedFrame = true
+                }
+            }
             self.captureThumbnailSource(from: image)
         }
         camera.onStateChange = { [weak self] runtime in

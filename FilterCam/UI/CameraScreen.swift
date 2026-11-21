@@ -17,6 +17,7 @@ struct CameraScreen: View {
 
             if let renderer = viewModel.previewRenderer {
                 CameraPreviewView(renderer: renderer)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .ignoresSafeArea()
             }
 
@@ -59,6 +60,15 @@ struct CameraScreen: View {
             }
 
             overlay
+
+            if viewModel.state == .running && !viewModel.hasReceivedFrame {
+                ProgressView("正在启动相机…")
+                    .tint(Theme.control)
+                    .foregroundStyle(Theme.control)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Theme.overlay, in: Capsule())
+            }
 
             if let toast = viewModel.toast {
                 VStack {
