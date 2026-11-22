@@ -853,9 +853,19 @@ final class CameraService: NSObject, CameraServicing {
             object: session,
             queue: .main
         ) { [weak self] notification in
+            guard let self else { return }
             let error = notification.userInfo?[AVCaptureSessionErrorKey] as? Error
-            let message = error?.localizedDescription ?? "相机运行时错误"
-            self?.onStateChange?(.failed(.configurationFailed(message)))
+            let ns = error as NSError?
+            let detail = ns.map {
+                "\($0.localizedDescription) (\($0.domain) \($0.code))"
+            } ?? "相机运行时错误"
+            self.onStateChange?(.failed(.configurationFailed(detail)))
+            // 运行时错误后会话通常已经不可用，先停掉把硬件让出来。
+            self.sessionQueue.async {
+                if self.session.isRunning {
+                    self.session.stopRunning()
+                }
+            }
         }
     }
 

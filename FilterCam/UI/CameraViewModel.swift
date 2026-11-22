@@ -61,7 +61,7 @@ final class CameraViewModel: ObservableObject {
     let userLUTLibrary: UserLUTLibrary
     let watermarkStore = WatermarkStore.shared
 
-    private let singleCamera: CameraServicing
+    private var singleCamera: CameraServicing
     private var activeCamera: CameraServicing
     private let permission: CameraPermissionProviding
     private let filterPipeline: FilterPipeline
@@ -144,7 +144,29 @@ final class CameraViewModel: ObservableObject {
     }
 
     func retry() {
-        Task { await start() }
+        Task {
+            if isRecording {
+                stopRecordingTimer()
+                isRecording = false
+            }
+            state = .initializing
+            // 运行时错误后旧会话可能已经不可用，重建一个再启动。
+            let old = activeCamera
+            old.onFrame = nil
+            old.onStateChange = nil
+            await old.stop()
+
+            let camera = CameraService()
+            singleCamera = camera
+            if isDualCameraEnabled {
+                activeCamera = DualCameraService()
+            } else {
+                activeCamera = camera
+            }
+            resetFrameState()
+            bindCamera()
+            await start()
+        }
     }
 
     func toggleFlash() {
