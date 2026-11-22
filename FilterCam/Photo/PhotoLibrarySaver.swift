@@ -161,10 +161,11 @@ final class PhotoLibrarySaver {
         )
     }
 
-    /// 双摄视频：先把前后两段合成「后摄主画面 + 前摄右上角小窗」，再套滤镜和水印。
+    /// 双摄视频：先把前后两段合成「后摄主画面 + 前摄小窗」，再套滤镜和水印。
     func saveDualVideo(
         backURL: URL,
         frontURL: URL,
+        pipCenter: CGPoint = PiPLayout.defaultCenter,
         watermark: String?,
         applying transform: @escaping (CIImage) -> CIImage
     ) async throws -> SavedVideo {
@@ -175,7 +176,11 @@ final class PhotoLibrarySaver {
         let duration = seconds.isFinite ? max(seconds, 0) : 0
         let natural = backAsset.tracks(withMediaType: .video).first?.naturalSize ?? .zero
 
-        let composed = try await composePiP(backURL: backURL, frontURL: frontURL)
+        let composed = try await composePiP(
+            backURL: backURL,
+            frontURL: frontURL,
+            pipCenter: pipCenter
+        )
         defer { try? FileManager.default.removeItem(at: composed) }
 
         let filtered = try await filterMovie(
@@ -205,8 +210,12 @@ final class PhotoLibrarySaver {
         )
     }
 
-    /// 把两段视频叠成画中画：后摄铺满，前摄贴右上角。
-    private func composePiP(backURL: URL, frontURL: URL) async throws -> URL {
+    /// 把两段视频叠成画中画：后摄铺满，前摄是可拖动的小窗。
+    private func composePiP(
+        backURL: URL,
+        frontURL: URL,
+        pipCenter: CGPoint
+    ) async throws -> URL {
         let backAsset = AVURLAsset(url: backURL)
         let frontAsset = AVURLAsset(url: frontURL)
         guard let backTrack = backAsset.tracks(withMediaType: .video).first,
@@ -257,12 +266,22 @@ final class PhotoLibrarySaver {
 
         let frontLayer = AVMutableVideoCompositionLayerInstruction(assetTrack: frontCompositionTrack)
         let insetWidth = renderSize.width * PiPLayout.widthRatio
-        let insetHeight = insetWidth / (9.0 / 16.0)
+        let insetHeight = insetWidth / PiPLayout.aspect
         let margin = renderSize.width * 0.035
-        // AV 视频坐标系原点在左上角。
+        let halfW = insetWidth / 2
+        let halfH = insetHeight / 2
+        // AV 视频坐标系原点在左上角，和 pipCenter 的显示坐标系一致。
+        let cx = min(
+            max(renderSize.width * pipCenter.x, margin + halfW),
+            renderSize.width - margin - halfW
+        )
+        let cy = min(
+            max(renderSize.height * pipCenter.y, margin + halfH),
+            renderSize.height - margin - halfH
+        )
         let insetRect = CGRect(
-            x: renderSize.width - insetWidth - margin,
-            y: margin,
+            x: cx - halfW,
+            y: cy - halfH,
             width: insetWidth,
             height: insetHeight
         )

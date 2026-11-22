@@ -8,6 +8,7 @@ struct CameraScreen: View {
     @State private var pinchStartZoom: CGFloat?
     @State private var isZoomDialVisible = false
     @State private var zoomDialTask: Task<Void, Never>?
+    @State private var pipDragStart: CGPoint?
 
     init() {
         _viewModel = StateObject(
@@ -38,6 +39,8 @@ struct CameraScreen: View {
             .allowsHitTesting(false)
 
             focusLayer
+
+            pipDragLayer
 
             VStack(spacing: 0) {
                 TopBar(
@@ -433,6 +436,70 @@ struct CameraScreen: View {
             )
         }
         .ignoresSafeArea()
+    }
+
+    // MARK: - 双摄小窗拖动
+
+    private var pipDragLayer: some View {
+        GeometryReader { geo in
+            if viewModel.isDualCameraEnabled,
+               let rect = pipViewRect(in: geo.size) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                if pipDragStart == nil {
+                                    pipDragStart = viewModel.pipCenter
+                                }
+                                let content = viewModel.previewContentSize
+                                guard content.width > 0, content.height > 0 else { return }
+                                let scale = AspectFill.transform(
+                                    contentSize: content,
+                                    in: CGRect(origin: .zero, size: geo.size)
+                                ).a
+                                guard scale > 0 else { return }
+                                let start = pipDragStart ?? viewModel.pipCenter
+                                viewModel.movePiP(
+                                    to: CGPoint(
+                                        x: start.x + value.translation.width / scale / content.width,
+                                        y: start.y + value.translation.height / scale / content.height
+                                    )
+                                )
+                            }
+                            .onEnded { _ in
+                                pipDragStart = nil
+                            }
+                    )
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    /// 小窗在屏幕上的位置：内容坐标 → AspectFill → 屏幕坐标。
+    private func pipViewRect(in bounds: CGSize) -> CGRect? {
+        let content = viewModel.previewContentSize
+        guard content.width > 0, content.height > 0 else { return nil }
+
+        let contentRect = CGRect(origin: .zero, size: content)
+        let ciRect = PiPLayout.rect(
+            in: contentRect,
+            aspect: PiPLayout.aspect,
+            center: viewModel.pipCenter
+        )
+        let displayRect = CGRect(
+            x: ciRect.minX,
+            y: content.height - ciRect.maxY,
+            width: ciRect.width,
+            height: ciRect.height
+        )
+        let transform = AspectFill.transform(
+            contentSize: content,
+            in: CGRect(origin: .zero, size: bounds)
+        )
+        return displayRect.applying(transform)
     }
 
     @ViewBuilder

@@ -34,6 +34,7 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var isLivePhotoEnabled = false
     @Published private(set) var captureMode: CaptureMode = .photo
     @Published private(set) var isDualCameraEnabled = false
+    @Published private(set) var pipCenter = PiPLayout.defaultCenter
     @Published private(set) var isRecording = false
     @Published private(set) var recordingDuration: TimeInterval = 0
     @Published var isWatermarkSheetPresented = false
@@ -234,6 +235,7 @@ final class CameraViewModel: ObservableObject {
                 isManualFocusEnabled = false
                 activeCamera = DualCameraService()
                 isDualCameraEnabled = true
+                movePiP(to: PiPLayout.defaultCenter)
             } else {
                 activeCamera = singleCamera
                 isDualCameraEnabled = false
@@ -258,6 +260,30 @@ final class CameraViewModel: ObservableObject {
             }
             Haptics.selection()
         }
+    }
+
+    /// 拖动前后双摄的小窗。center 是显示坐标系的归一化位置（原点左上）。
+    func movePiP(to center: CGPoint) {
+        var x = min(max(center.x, 0), 1)
+        var y = min(max(center.y, 0), 1)
+
+        let content = previewContentSize
+        if content.width > 0, content.height > 0 {
+            let ratio = content.width / content.height
+            let width = PiPLayout.widthRatio
+            let height = width * ratio / PiPLayout.aspect
+            let marginX: CGFloat = 0.035
+            let marginY = marginX * ratio
+            let minX = marginX + width / 2
+            let maxX = 1 - marginX - width / 2
+            let minY = marginY + height / 2
+            let maxY = 1 - marginY - height / 2
+            x = min(max(x, minX), max(minX, maxX))
+            y = min(max(y, minY), max(minY, maxY))
+        }
+
+        pipCenter = CGPoint(x: x, y: y)
+        (activeCamera as? DualCameraService)?.setPiPCenter(pipCenter)
     }
 
     private func resetFrameState() {
@@ -367,6 +393,7 @@ final class CameraViewModel: ObservableObject {
                     info = try await photoSaver.saveDualVideo(
                         backURL: video.url,
                         frontURL: frontURL,
+                        pipCenter: pipCenter,
                         watermark: watermark,
                         applying: transform
                     )

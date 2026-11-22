@@ -35,6 +35,9 @@ final class DualCameraService: NSObject, CameraServicing {
     private var latestFront: CIImage?
     private let frameLock = NSLock()
 
+    private var pipCenter = PiPLayout.defaultCenter
+    private let pipLock = NSLock()
+
     private var photoContinuation: CheckedContinuation<CapturedPhoto, Error>?
     private var pendingBack: CapturedPhoto?
     private var pendingFront: CapturedPhoto?
@@ -113,6 +116,19 @@ final class DualCameraService: NSObject, CameraServicing {
 
     func setPhotoResolution(_ resolution: PhotoResolution) {
         // 双摄固定 12MP，最高像素档不可用。
+    }
+
+    /// 小窗位置：显示坐标系的归一化点（原点左上）。
+    func setPiPCenter(_ center: CGPoint) {
+        pipLock.lock()
+        pipCenter = center
+        pipLock.unlock()
+    }
+
+    private var currentPiPCenter: CGPoint {
+        pipLock.lock()
+        defer { pipLock.unlock() }
+        return pipCenter
     }
 
     var isLivePhotoCaptureSupported: Bool { false }
@@ -719,8 +735,13 @@ extension DualCameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
 
         // 只跟随后摄的帧率合成，前摄帧只用来更新小窗。
         guard output === backVideoOutput, let back else { return }
-        let aspect: CGFloat = captureMode == .video ? 9.0 / 16.0 : 3.0 / 4.0
-        onFrame?(PiPComposer.compose(back: back, front: front, aspect: aspect))
+        onFrame?(
+            PiPComposer.compose(
+                back: back,
+                front: front,
+                center: currentPiPCenter
+            )
+        )
     }
 }
 
@@ -775,17 +796,21 @@ extension DualCameraService: AVCapturePhotoCaptureDelegate {
 
         guard let finished, let back, let front else { return }
 
-        let composed = Self.compose(back: back, front: front)
+        let composed = Self.compose(back: back, front: front, center: currentPiPCenter)
         finished.resume(returning: composed)
     }
 
-    private static func compose(back: CapturedPhoto, front: CapturedPhoto) -> CapturedPhoto {
+    private static func compose(
+        back: CapturedPhoto,
+        front: CapturedPhoto,
+        center: CGPoint
+    ) -> CapturedPhoto {
         let backImage = back.image.oriented(back.orientation)
         let frontImage = front.image.oriented(front.orientation)
         let composed = PiPComposer.compose(
             back: backImage,
             front: frontImage,
-            aspect: 3.0 / 4.0
+            center: center
         )
         return CapturedPhoto(
             image: composed,
