@@ -28,7 +28,7 @@ struct FocusReticleView: View {
 
             if isLocked {
                 Text("AE/AF 锁定")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: Theme.Font.small, weight: .medium))
                     .foregroundStyle(tint)
                     .fixedSize()
                     .offset(y: 52)

@@ -14,18 +14,19 @@ struct CrashReportView: View {
 
                 VStack(spacing: 14) {
                     Text("上次运行闪退了")
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(.system(size: Theme.Font.title, weight: .semibold))
                         .foregroundStyle(Theme.control)
 
                     Text("下面是 App 自己记录的原因和最近步骤，复制发给我就能定位。")
-                        .font(.system(size: 13))
+                        .font(.system(size: Theme.Font.body))
+                        .lineSpacing(6)
                         .multilineTextAlignment(.center)
                         .foregroundStyle(Theme.controlDim)
                         .padding(.horizontal, 8)
 
                     ScrollView {
                         Text(text)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: Theme.Font.small, design: .monospaced))
                             .foregroundStyle(Theme.control)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.enabled)
@@ -40,7 +41,7 @@ struct CrashReportView: View {
                             Haptics.selection()
                         } label: {
                             Label(didCopy ? "已复制" : "复制全部", systemImage: didCopy ? "checkmark" : "doc.on.doc")
-                                .font(.system(size: 15, weight: .medium))
+                                .font(.system(size: Theme.Font.body, weight: .medium))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
                                 .background(Color.white.opacity(0.14), in: Capsule())
@@ -51,7 +52,7 @@ struct CrashReportView: View {
                             dismiss()
                         } label: {
                             Text("关闭")
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(.system(size: Theme.Font.body, weight: .semibold))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
                                 .background(Color.white, in: Capsule())

@@ -9,7 +9,7 @@ struct FilterStrip: View {
     let onOpenLibrary: () -> Void
 
     private let itemSize: CGFloat = 48
-    private let labelWidth: CGFloat = 56
+    private let labelWidth: CGFloat = 64
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -23,7 +23,7 @@ struct FilterStrip: View {
                                 thumbnail(for: preset)
                                 Text(preset.stripName)
                                     .font(.system(
-                                        size: 10,
+                                        size: Theme.Font.small,
                                         weight: selectedID == preset.id ? .semibold : .regular
                                     ))
                                     .foregroundStyle(
@@ -45,12 +45,12 @@ struct FilterStrip: View {
                             ZStack {
                                 Circle().fill(Color.white.opacity(0.14))
                                 Image(systemName: "square.grid.2x2")
-                                    .font(.system(size: 17, weight: .medium))
+                                    .font(.system(size: Theme.Font.iconBody, weight: .medium))
                                     .foregroundStyle(Theme.control)
                             }
                             .frame(width: itemSize, height: itemSize)
                             Text("全部")
-                                .font(.system(size: 10))
+                                .font(.system(size: Theme.Font.small))
                                 .foregroundStyle(Theme.controlDim)
                                 .frame(width: labelWidth)
                         }

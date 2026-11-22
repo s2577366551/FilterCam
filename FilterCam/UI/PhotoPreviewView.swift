@@ -30,7 +30,7 @@ struct PhotoPreviewView: View {
                     if let shareURL {
                         ShareLink(item: shareURL) {
                             Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(.system(size: Theme.Font.iconBody, weight: .semibold))
                                 .foregroundStyle(.white)
                                 .frame(width: 36, height: 36)
                                 .background(.ultraThinMaterial, in: Circle())
@@ -42,7 +42,7 @@ struct PhotoPreviewView: View {
 
                     Button(action: onClose) {
                         Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: Theme.Font.iconBody, weight: .semibold))
                             .foregroundStyle(.white)
                             .frame(width: 36, height: 36)
                             .background(.ultraThinMaterial, in: Circle())
@@ -56,7 +56,7 @@ struct PhotoPreviewView: View {
 
                 if scale <= 1.01 {
                     Text("双指放大 · 双击缩放")
-                        .font(.system(size: 12))
+                        .font(.system(size: Theme.Font.caption))
                         .foregroundStyle(.white.opacity(0.55))
                         .padding(.bottom, 24)
                         .transition(.opacity)

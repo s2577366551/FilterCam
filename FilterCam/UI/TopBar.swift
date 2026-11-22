@@ -87,10 +87,10 @@ struct TopBar: View {
             HStack(spacing: 4) {
                 if let systemImage {
                     Image(systemName: systemImage)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: Theme.Font.small, weight: .semibold))
                 }
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: Theme.Font.small, weight: .semibold))
             }
             .foregroundStyle(isActive ? Color.black : Theme.control)
             .padding(.horizontal, 10)
@@ -111,7 +111,7 @@ struct TopBar: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .medium))
+                .font(.system(size: Theme.Font.iconBody, weight: .medium))
                 .foregroundStyle(isActive ? Color.black : Theme.control)
                 .frame(width: 40, height: 40)
                 .background(isActive ? Color.yellow : Theme.overlay, in: Circle())

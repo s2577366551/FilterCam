@@ -9,11 +9,11 @@ struct AdjustmentPanel: View {
         VStack(spacing: 4) {
             HStack {
                 Text("调节")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: Theme.Font.caption, weight: .semibold))
                     .foregroundStyle(Theme.controlDim)
                 Spacer()
                 Button("重置", action: onReset)
-                    .font(.system(size: 12))
+                    .font(.system(size: Theme.Font.caption))
                     .foregroundStyle(Theme.control)
             }
             .padding(.horizontal, 20)
@@ -48,9 +48,9 @@ struct AdjustmentPanel: View {
     ) -> some View {
         HStack(spacing: 8) {
             Text(title)
-                .font(.system(size: 11))
+                .font(.system(size: Theme.Font.small))
                 .foregroundStyle(Theme.controlDim)
-                .frame(width: 28, alignment: .leading)
+                .frame(width: 32, alignment: .leading)
             Slider(
                 value: Binding(
                     get: { Double(value) },

@@ -7,7 +7,7 @@ struct IntensitySlider: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "circle.lefthalf.filled")
-                .font(.system(size: 14))
+                .font(.system(size: Theme.Font.iconCaption))
                 .foregroundStyle(Theme.controlDim)
 
             Slider(
@@ -20,10 +20,10 @@ struct IntensitySlider: View {
             .tint(.white)
 
             Text("\(Int(value * 100))%")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: Theme.Font.caption, weight: .medium))
                 .monospacedDigit()
                 .foregroundStyle(Theme.control)
-                .frame(width: 40, alignment: .trailing)
+                .frame(width: 44, alignment: .trailing)
         }
         .padding(.horizontal, 20)
     }

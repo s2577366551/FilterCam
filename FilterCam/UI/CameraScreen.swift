@@ -92,7 +92,7 @@ struct CameraScreen: View {
                             .fill(Color.red)
                             .frame(width: 8, height: 8)
                         Text(CameraViewModel.durationText(viewModel.recordingDuration))
-                            .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                            .font(.system(size: Theme.Font.caption, weight: .semibold).monospacedDigit())
                             .foregroundStyle(.white)
                     }
                     .padding(.horizontal, 12)
@@ -240,7 +240,7 @@ struct CameraScreen: View {
     private var zoomPill: some View {
         let isZoomed = abs(viewModel.zoomFactor - 1) > 0.01
         return Text(String(format: "%.1f×", viewModel.zoomFactor))
-            .font(.system(size: 12, weight: .semibold).monospacedDigit())
+            .font(.system(size: Theme.Font.caption, weight: .semibold).monospacedDigit())
             .foregroundStyle(isZoomed ? Color.yellow : Theme.control)
             .padding(.horizontal, 10)
             .frame(height: 26)
@@ -271,7 +271,7 @@ struct CameraScreen: View {
                             : Color.white.opacity(0.12)
                     )
                 Image(systemName: "signature")
-                    .font(.system(size: 18, weight: .medium))
+                    .font(.system(size: Theme.Font.iconBody, weight: .medium))
                     .foregroundStyle(
                         viewModel.watermarkStore.isEnabled ? Color.black : Theme.control
                     )
@@ -294,7 +294,7 @@ struct CameraScreen: View {
                     viewModel.selectCaptureMode(mode)
                 } label: {
                     Text(mode.displayName)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: Theme.Font.body, weight: .semibold))
                         .foregroundStyle(
                             viewModel.captureMode == mode ? Color.yellow : Theme.controlDim
                         )
@@ -324,7 +324,7 @@ struct CameraScreen: View {
                         .scaledToFill()
                 } else {
                     Image(systemName: "photo")
-                        .font(.system(size: 15))
+                        .font(.system(size: Theme.Font.iconCaption))
                         .foregroundStyle(Theme.controlDim)
                 }
             }
@@ -465,7 +465,7 @@ struct CameraScreen: View {
                 .foregroundStyle(Theme.control)
         case .paused:
             Text("相机已暂停")
-                .font(.system(size: 15))
+                .font(.system(size: Theme.Font.body))
                 .foregroundStyle(Theme.controlDim)
                 .padding(12)
                 .background(Theme.overlay, in: Capsule())

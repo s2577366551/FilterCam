@@ -32,7 +32,7 @@ struct WatermarkSheet: View {
                         Text("效果")
                         Spacer()
                         Text(store.displayText.isEmpty ? "—" : store.displayText)
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: Theme.Font.body, weight: .semibold))
                             .foregroundStyle(Theme.control)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)

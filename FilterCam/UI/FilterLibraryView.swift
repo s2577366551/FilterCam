@@ -124,10 +124,11 @@ struct FilterLibraryView: View {
                 .font(.system(size: 32))
                 .foregroundStyle(Theme.controlDim)
             Text("还没有导入 LUT")
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: Theme.Font.body, weight: .medium))
                 .foregroundStyle(Theme.control)
             Text("点左上角「导入」选择 .cube 文件。\n富士官方 LUT 已内置在「富士官方」分类。")
-                .font(.system(size: 12))
+                .font(.system(size: Theme.Font.caption))
+                .lineSpacing(5)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.controlDim)
         }
@@ -143,7 +144,7 @@ struct FilterLibraryView: View {
                         category = item
                     } label: {
                         Text(item.displayName)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: Theme.Font.caption, weight: .medium))
                             .foregroundStyle(category == item ? Color.black : Theme.control)
                             .padding(.horizontal, 14)
                             .frame(height: 34)
@@ -180,14 +181,14 @@ struct FilterLibraryView: View {
                         )
                     if store.isFavorite(preset.id) {
                         Image(systemName: "star.fill")
-                            .font(.system(size: 12))
+                            .font(.system(size: Theme.Font.caption))
                             .foregroundStyle(.yellow)
                             .padding(6)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     }
                     if let lut = lut(for: preset) {
                         Text(lut.isFLog2 ? "F-Log2" : "sRGB")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.system(size: Theme.Font.small, weight: .semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
@@ -196,7 +197,7 @@ struct FilterLibraryView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     } else if preset.officialLUTID != nil {
                         Text("官方")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.system(size: Theme.Font.small, weight: .semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
@@ -209,7 +210,7 @@ struct FilterLibraryView: View {
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
 
                 Text(preset.category == .official ? preset.displayName : preset.stripName)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: Theme.Font.caption, weight: .medium))
                     .foregroundStyle(selectedID == preset.id ? Theme.control : Theme.controlDim)
                     .lineLimit(1)
             }

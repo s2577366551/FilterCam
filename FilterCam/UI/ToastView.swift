@@ -5,7 +5,7 @@ struct ToastView: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 13, weight: .medium))
+            .font(.system(size: Theme.Font.caption, weight: .medium))
             .foregroundStyle(Theme.control)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
