@@ -208,8 +208,8 @@ final class CameraService: NSObject, CameraServicing {
         defer { device.unlockForConfiguration() }
 
         device.setFocusModeLocked(lensPosition: min(max(lensPosition, 0), 1))
-        if device.isExposureModeSupported(.continuousAutoExpose) {
-            device.exposureMode = .continuousAutoExpose
+        if device.isExposureModeSupported(.continuousAutoExposure) {
+            device.exposureMode = .continuousAutoExposure
         }
     }
 
@@ -227,8 +227,8 @@ final class CameraService: NSObject, CameraServicing {
         if device.isFocusModeSupported(.continuousAutoFocus) {
             device.focusMode = .continuousAutoFocus
         }
-        if device.isExposureModeSupported(.continuousAutoExpose) {
-            device.exposureMode = .continuousAutoExpose
+        if device.isExposureModeSupported(.continuousAutoExposure) {
+            device.exposureMode = .continuousAutoExposure
         }
     }
 
@@ -310,8 +310,8 @@ final class CameraService: NSObject, CameraServicing {
             if device.isFocusModeSupported(.continuousAutoFocus) {
                 device.focusMode = .continuousAutoFocus
             }
-            if device.isExposureModeSupported(.continuousAutoExpose) {
-                device.exposureMode = .continuousAutoExpose
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
             }
             device.unlockForConfiguration()
         }
