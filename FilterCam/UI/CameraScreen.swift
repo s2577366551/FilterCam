@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @MainActor
 struct CameraScreen: View {
@@ -114,7 +115,10 @@ struct CameraScreen: View {
         }
         .fullScreenCover(isPresented: $viewModel.isPreviewPresented) {
             if let photo = viewModel.lastPhoto {
-                PhotoPreviewView(image: photo) {
+                PhotoPreviewView(
+                    image: photo,
+                    shareURL: viewModel.lastPhotoFileURL
+                ) {
                     viewModel.isPreviewPresented = false
                 }
             }
@@ -163,7 +167,26 @@ struct CameraScreen: View {
         }
         .buttonStyle(.plain)
         .disabled(viewModel.lastPhoto == nil)
+        .contextMenu {
+            Button {
+                openPhotosApp()
+            } label: {
+                Label("在相册中打开", systemImage: "photo.on.rectangle")
+            }
+
+            if let url = viewModel.lastPhotoFileURL {
+                ShareLink(item: url) {
+                    Label("分享原图", systemImage: "square.and.arrow.up")
+                }
+            }
+        }
         .accessibilityLabel("查看刚拍的照片")
+    }
+
+    /// 跳到系统「照片」App（iOS 没有公开接口定位到某一张，只能打开 App）。
+    private func openPhotosApp() {
+        guard let url = URL(string: "photos-redirect://") else { return }
+        UIApplication.shared.open(url)
     }
 
     /// 覆盖全屏的透明层：点按对焦，并显示对焦框。

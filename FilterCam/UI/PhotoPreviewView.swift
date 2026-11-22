@@ -3,6 +3,7 @@ import SwiftUI
 /// 全屏查看刚拍的照片：双指缩放、拖动、双击复位。
 struct PhotoPreviewView: View {
     let image: UIImage
+    var shareURL: URL? = nil
     let onClose: () -> Void
 
     @State private var scale: CGFloat = 1
@@ -26,7 +27,19 @@ struct PhotoPreviewView: View {
 
             VStack {
                 HStack {
+                    if let shareURL {
+                        ShareLink(item: shareURL) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 36, height: 36)
+                                .background(.ultraThinMaterial, in: Circle())
+                        }
+                        .accessibilityLabel("分享原图")
+                    }
+
                     Spacer()
+
                     Button(action: onClose) {
                         Image(systemName: "xmark")
                             .font(.system(size: 15, weight: .semibold))

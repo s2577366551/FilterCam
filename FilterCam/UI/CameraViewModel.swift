@@ -31,6 +31,7 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var photoResolution: PhotoResolution = .standard
     @Published private(set) var isLivePhotoEnabled = false
     @Published private(set) var lastPhoto: UIImage?
+    @Published private(set) var lastPhotoFileURL: URL?
     @Published var isPreviewPresented = false
     @Published private(set) var previewContentSize: CGSize = .zero
 
@@ -259,6 +260,10 @@ final class CameraViewModel: ObservableObject {
                     )
                 }
                 lastPhoto = makePreviewImage(from: captured, settings: settings)
+                if let previous = lastPhotoFileURL {
+                    try? FileManager.default.removeItem(at: previous)
+                }
+                lastPhotoFileURL = info.fileURL
                 showToast(
                     "已保存 \(info.pixelWidth)×\(info.pixelHeight)"
                         + (info.isLivePhoto ? " 实况" : "")

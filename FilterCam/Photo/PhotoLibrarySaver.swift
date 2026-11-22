@@ -9,6 +9,8 @@ struct SavedPhoto {
     let pixelHeight: Int
     let byteCount: Int
     let isLivePhoto: Bool
+    /// 全分辨率原文件的临时路径，用于分享。
+    let fileURL: URL?
 }
 
 enum PhotoSaveError: LocalizedError {
@@ -57,6 +59,7 @@ final class PhotoLibrarySaver {
             }
         }
         let (photoData, size) = encoded
+        let shareURL = Self.writeShareFile(photoData)
 
         if let movieURL = captured.livePhotoMovieURL {
             return try await saveLivePhoto(
@@ -64,6 +67,7 @@ final class PhotoLibrarySaver {
                 size: size,
                 movieURL: movieURL,
                 captured: captured,
+                shareURL: shareURL,
                 transform: transform
             )
         }
@@ -75,8 +79,21 @@ final class PhotoLibrarySaver {
             pixelWidth: Int(size.width),
             pixelHeight: Int(size.height),
             byteCount: photoData.count,
-            isLivePhoto: false
+            isLivePhoto: false,
+            fileURL: shareURL
         )
+    }
+
+    /// 写一份临时 HEIC，供分享使用（全分辨率、最高质量）。
+    private static func writeShareFile(_ data: Data) -> URL? {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("filtercam-share-\(UUID().uuidString).heic")
+        do {
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
+        }
     }
 
     // MARK: - 实况照片
@@ -86,6 +103,7 @@ final class PhotoLibrarySaver {
         size: CGSize,
         movieURL: URL,
         captured: CapturedPhoto,
+        shareURL: URL?,
         transform: @escaping (CIImage) -> CIImage
     ) async throws -> SavedPhoto {
         let filteredMovie = try await filterMovie(
@@ -109,7 +127,8 @@ final class PhotoLibrarySaver {
             pixelWidth: Int(size.width),
             pixelHeight: Int(size.height),
             byteCount: photoData.count,
-            isLivePhoto: true
+            isLivePhoto: true,
+            fileURL: shareURL
         )
     }
 
