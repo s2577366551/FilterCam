@@ -53,6 +53,25 @@ struct FilterPreset: Identifiable, Equatable, Hashable {
         lutName != nil || userLUTID != nil
     }
 
+    /// 滤镜条上显示的短名字：去掉富士官方文件名的前后缀，避免把布局撑开。
+    var stripName: String {
+        var name = displayName
+        for prefix in ["FLog2_to_", "FLog2-to-", "FLog2_to", "FLog2 "] where name.hasPrefix(prefix) {
+            name.removeFirst(prefix.count)
+            break
+        }
+        for marker in ["_33grid", "_33Grid", "_V.1", "_v1", ".cube"] {
+            if let range = name.range(of: marker) {
+                name = String(name[..<range.lowerBound])
+            }
+        }
+        name = name
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? displayName : name
+    }
+
     static let original = FilterPreset(
         id: "original",
         displayName: "原图",

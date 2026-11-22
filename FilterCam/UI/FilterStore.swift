@@ -46,10 +46,10 @@ final class FilterStore: ObservableObject {
     }
 
     var stripIDs: [String] {
-        var ids: [String] = []
+        var ids: [String] = [FilterPreset.original.id]
         for id in favorites + recents where !ids.contains(id) {
             ids.append(id)
         }
-        return [FilterPreset.original.id] + Array(ids.prefix(Self.stripLimit))
+        return Array(ids.prefix(Self.stripLimit + 1))
     }
 }

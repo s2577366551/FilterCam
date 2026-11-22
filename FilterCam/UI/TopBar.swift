@@ -13,59 +13,72 @@ struct TopBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Button(action: onFlash) {
-                Label(flashMode.displayName, systemImage: flashSymbol)
-                    .labelStyle(.titleAndIcon)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.control)
-                    .padding(.horizontal, 10)
-                    .frame(height: Theme.hitTarget)
-                    .background(Theme.overlay, in: Capsule())
-            }
+            pillButton(
+                title: flashMode.displayName,
+                systemImage: flashSymbol,
+                isActive: flashMode != .auto,
+                action: onFlash
+            )
 
-            Button(action: onManualFocus) {
-                Text("MF")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isManualFocus ? Color.black : Theme.control)
-                    .padding(.horizontal, 12)
-                    .frame(height: Theme.hitTarget)
-                    .background(
-                        isManualFocus ? Color.yellow : Theme.overlay,
-                        in: Capsule()
-                    )
-            }
-            .accessibilityLabel("手动对焦")
+            pillButton(
+                title: "MF",
+                systemImage: nil,
+                isActive: isManualFocus,
+                action: onManualFocus
+            )
 
-            Button(action: onResolution) {
-                Text(resolutionBadge)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.control)
-                    .padding(.horizontal, 10)
-                    .frame(height: Theme.hitTarget)
-                    .background(Theme.overlay, in: Capsule())
-            }
-            .accessibilityLabel("拍照分辨率")
+            pillButton(
+                title: resolutionBadge,
+                systemImage: nil,
+                isActive: resolutionBadge != "12M",
+                action: onResolution
+            )
 
-            Button(action: onLivePhoto) {
-                Image(systemName: "livephoto")
-                    .font(.system(size: 17))
-                    .foregroundStyle(isLivePhoto ? Color.yellow : Theme.controlDim)
-                    .frame(width: Theme.hitTarget, height: Theme.hitTarget)
-                    .background(Theme.overlay, in: Circle())
-            }
-            .accessibilityLabel("实况照片")
+            pillButton(
+                title: "实况",
+                systemImage: nil,
+                isActive: isLivePhoto,
+                action: onLivePhoto
+            )
 
-            Spacer()
+            Spacer(minLength: 4)
 
             Button(action: onFlip) {
                 Image(systemName: "arrow.triangle.2.circlepath.camera")
-                    .font(.system(size: 18))
+                    .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(Theme.control)
-                    .frame(width: Theme.hitTarget, height: Theme.hitTarget)
+                    .frame(width: 40, height: 40)
                     .background(Theme.overlay, in: Circle())
             }
+            .accessibilityLabel("切换摄像头")
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 14)
+    }
+
+    private func pillButton(
+        title: String,
+        systemImage: String?,
+        isActive: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .foregroundStyle(isActive ? Color.black : Theme.control)
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(
+                isActive ? Color.yellow : Theme.overlay,
+                in: Capsule()
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private var flashSymbol: String {

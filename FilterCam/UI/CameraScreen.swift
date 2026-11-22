@@ -69,7 +69,7 @@ struct CameraScreen: View {
                     ShutterButton(isBusy: viewModel.isSavingPhoto) { viewModel.capture() }
                     Spacer()
                     Color.clear
-                        .frame(width: 48, height: 48)
+                        .frame(width: 50, height: 50)
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 12)
@@ -158,7 +158,7 @@ struct CameraScreen: View {
                         .foregroundStyle(Theme.controlDim)
                 }
             }
-            .frame(width: 48, height: 48)
+            .frame(width: 50, height: 50)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
