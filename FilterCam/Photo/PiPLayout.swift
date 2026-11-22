@@ -37,16 +37,15 @@ enum PiPComposer {
         guard frame.width > 0, frame.height > 0 else { return back }
 
         let inset = PiPLayout.insetRect(in: frame, aspect: aspect)
-        let borderWidth = max(frame.width * 0.006, 1)
-        let borderRect = inset.insetBy(dx: -borderWidth, dy: -borderWidth)
-        let border = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: borderRect)
-
+        let radius = inset.width * 0.09
         let scaled = front
             .transformed(by: PiPLayout.fillTransform(content: front.extent, into: inset))
             .cropped(to: inset)
 
-        let rounded = rounded(scaled, rect: inset, radius: inset.width * 0.09)
-        return rounded.composited(over: border.composited(over: back))
+        let rounded = rounded(scaled, rect: inset, radius: radius)
+        // 不要白边，用一层很淡的柔和阴影把画面托起来。
+        let shadow = softShadow(rect: inset, radius: radius, frame: frame)
+        return rounded.composited(over: shadow.composited(over: back))
     }
 
     /// 给前摄小窗加圆角，接近视频通话的画中画。
@@ -63,5 +62,26 @@ enum PiPComposer {
                 kCIInputBackgroundImageKey: CIImage.empty()
             ]
         )
+    }
+
+    /// 半透明黑色圆角矩形 + 高斯模糊，作为小窗的柔和投影。
+    private static func softShadow(rect: CGRect, radius: CGFloat, frame: CGRect) -> CIImage {
+        let blur = max(frame.width * 0.008, 4)
+        let offset = max(frame.width * 0.004, 2)
+        let shadowRect = rect.offsetBy(dx: 0, dy: -offset)
+        let padded = shadowRect.insetBy(dx: -blur * 2, dy: -blur * 2)
+
+        guard let filter = CIFilter(name: "CIRoundedRectangleGenerator") else {
+            return CIImage.empty()
+        }
+        filter.setValue(CIVector(cgRect: padded), forKey: "inputExtent")
+        filter.setValue(radius + blur, forKey: "inputRadius")
+        filter.setValue(CIColor(red: 0, green: 0, blue: 0, alpha: 0.30), forKey: "inputColor")
+        guard let base = filter.outputImage?.cropped(to: padded) else {
+            return CIImage.empty()
+        }
+        return base
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: blur])
+            .cropped(to: frame)
     }
 }
