@@ -61,6 +61,7 @@ final class CameraViewModel: ObservableObject {
     private var settingsIntensity: Float = 0
     private var settingsAdjustments: FilterAdjustments = .neutral
     private var didCaptureThumbnailSource = false
+    private var frameCount = 0
     private var didReceiveFrame = false
     private var frameSize: CGSize = .zero
     private var reticleTask: Task<Void, Never>?
@@ -156,6 +157,7 @@ final class CameraViewModel: ObservableObject {
                 focusReticle = nil
                 settingsLock.lock()
                 didCaptureThumbnailSource = false
+                frameCount = 0
                 settingsLock.unlock()
                 thumbnails.removeAll()
             } catch {
@@ -480,14 +482,28 @@ final class CameraViewModel: ObservableObject {
 
     private func captureThumbnailSource(from image: CIImage) {
         settingsLock.lock()
-        let shouldCapture = !didCaptureThumbnailSource
+        frameCount += 1
+        // 等对焦和曝光稳定（约 1.2 秒 / 36 帧）再取缩略图源，否则会是糊的。
+        let shouldCapture = !didCaptureThumbnailSource && frameCount >= 36
         if shouldCapture {
             didCaptureThumbnailSource = true
         }
         settingsLock.unlock()
         guard shouldCapture else { return }
 
-        thumbnailService.generate(from: image, presets: PresetCatalog.all) { [weak self] images in
+        generateThumbnails(from: image)
+    }
+
+    /// 用当前画面重新生成全部缩略图（含导入的 LUT）。
+    func refreshThumbnailsFromCurrentFrame() {
+        guard let frame = lastFrame else { return }
+        generateThumbnails(from: frame)
+    }
+
+    private func generateThumbnails(from image: CIImage) {
+        let presets = PresetCatalog.all
+            + userLUTLibrary.currentLUTs().map { FilterPreset.user($0) }
+        thumbnailService.generate(from: image, presets: presets) { [weak self] images in
             Task { @MainActor in
                 self?.thumbnails.merge(images) { _, new in new }
             }

@@ -193,7 +193,7 @@ struct FilterLibraryView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     }
                 }
-                .frame(height: 92)
+                .aspectRatio(1, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
 
                 Text(preset.stripName)

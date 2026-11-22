@@ -124,6 +124,11 @@ struct CameraScreen: View {
                 }
             }
         }
+        .onChange(of: viewModel.isLibraryPresented) { _, presented in
+            if presented {
+                viewModel.refreshThumbnailsFromCurrentFrame()
+            }
+        }
         .onAppear { viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
         .onChange(of: scenePhase) { _, phase in
