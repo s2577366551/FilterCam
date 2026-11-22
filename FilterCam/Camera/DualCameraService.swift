@@ -176,8 +176,6 @@ final class DualCameraService: NSObject, CameraServicing {
         session.addOutputWithNoConnections(frontPhotoOutput)
         backPhotoOutput.maxPhotoQualityPrioritization = .quality
         frontPhotoOutput.maxPhotoQualityPrioritization = .quality
-        Self.applyMaxPhotoDimensions(to: backPhotoOutput, device: backDevice)
-        Self.applyMaxPhotoDimensions(to: frontPhotoOutput, device: frontDevice)
         CrashLogger.breadcrumb("双摄: 照片输出已添加")
 
         guard addConnection(input: back, output: backVideoOutput, mirrored: false) != nil,
@@ -188,6 +186,9 @@ final class DualCameraService: NSObject, CameraServicing {
               addConnection(input: front, output: frontPhotoOutput, mirrored: true) != nil else {
             throw CameraError.configurationFailed("无法连接前后摄像头拍照")
         }
+        // 必须先连上视频源设备，才能设置 maxPhotoDimensions，否则会抛异常。
+        Self.applyMaxPhotoDimensions(to: backPhotoOutput, device: backDevice)
+        Self.applyMaxPhotoDimensions(to: frontPhotoOutput, device: frontDevice)
         CrashLogger.breadcrumb("双摄: 连接已建立")
 
         // 双路 1080p 超出硬件预算时退回 720p。
@@ -290,6 +291,7 @@ final class DualCameraService: NSObject, CameraServicing {
             guard addConnection(input: backInput, output: backPhotoOutput, mirrored: false) != nil else {
                 throw CameraError.configurationFailed("无法连接后摄拍照")
             }
+            Self.applyMaxPhotoDimensions(to: backPhotoOutput, device: backInput.device)
         }
         if !session.outputs.contains(where: { $0 === frontPhotoOutput }) {
             guard session.canAddOutput(frontPhotoOutput) else {
@@ -299,6 +301,7 @@ final class DualCameraService: NSObject, CameraServicing {
             guard addConnection(input: frontInput, output: frontPhotoOutput, mirrored: true) != nil else {
                 throw CameraError.configurationFailed("无法连接前摄拍照")
             }
+            Self.applyMaxPhotoDimensions(to: frontPhotoOutput, device: frontInput.device)
         }
     }
 
