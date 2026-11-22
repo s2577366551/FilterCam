@@ -57,15 +57,20 @@ final class DualCameraService: NSObject, CameraServicing {
     func start() async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             sessionQueue.async {
+                CrashLogger.breadcrumb("双摄: 开始启动")
                 do {
                     try self.configureIfNeeded()
                     self.observeIfNeeded()
                     if !self.session.isRunning {
+                        CrashLogger.breadcrumb("双摄: startRunning")
                         self.session.startRunning()
+                        CrashLogger.breadcrumb("双摄: startRunning 返回")
                     }
                     self.onStateChange?(.running)
+                    CrashLogger.breadcrumb("双摄: 已运行")
                     continuation.resume()
                 } catch {
+                    CrashLogger.breadcrumb("双摄: 启动失败 \(error.localizedDescription)")
                     continuation.resume(throwing: error)
                 }
             }
@@ -75,6 +80,7 @@ final class DualCameraService: NSObject, CameraServicing {
     func stop() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             sessionQueue.async {
+                CrashLogger.breadcrumb("双摄: 开始停止")
                 if self.backMovieOutput.isRecording {
                     self.backMovieOutput.stopRecording()
                 }
@@ -84,6 +90,7 @@ final class DualCameraService: NSObject, CameraServicing {
                 if self.session.isRunning {
                     self.session.stopRunning()
                 }
+                CrashLogger.breadcrumb("双摄: 已停止")
                 self.onStateChange?(.idle)
                 continuation.resume()
             }
@@ -117,6 +124,8 @@ final class DualCameraService: NSObject, CameraServicing {
         session.beginConfiguration()
         defer { session.commitConfiguration() }
 
+        CrashLogger.breadcrumb("双摄: beginConfiguration")
+
         guard let backDevice = Self.device(.back),
               let frontDevice = Self.device(.front) else {
             throw CameraError.noCameraAvailable
@@ -124,6 +133,7 @@ final class DualCameraService: NSObject, CameraServicing {
 
         Self.applyVideoFormat(for: backDevice, width: 1920, height: 1080)
         Self.applyVideoFormat(for: frontDevice, width: 1920, height: 1080)
+        CrashLogger.breadcrumb("双摄: 格式已设置")
 
         let back = try AVCaptureDeviceInput(device: backDevice)
         let front = try AVCaptureDeviceInput(device: frontDevice)
@@ -134,6 +144,9 @@ final class DualCameraService: NSObject, CameraServicing {
         session.addInputWithNoConnections(front)
         backInput = back
         frontInput = front
+        Self.configureFocus(for: backDevice)
+        Self.configureFocus(for: frontDevice)
+        CrashLogger.breadcrumb("双摄: 输入已添加")
 
         for output in [backVideoOutput, frontVideoOutput] {
             output.alwaysDiscardsLateVideoFrames = true
@@ -147,6 +160,7 @@ final class DualCameraService: NSObject, CameraServicing {
         }
         backVideoOutput.setSampleBufferDelegate(self, queue: videoQueue)
         frontVideoOutput.setSampleBufferDelegate(self, queue: videoQueue)
+        CrashLogger.breadcrumb("双摄: 视频输出已添加")
 
         guard session.canAddOutput(backPhotoOutput),
               session.canAddOutput(frontPhotoOutput) else {
@@ -158,6 +172,7 @@ final class DualCameraService: NSObject, CameraServicing {
         frontPhotoOutput.maxPhotoQualityPrioritization = .quality
         Self.applyMaxPhotoDimensions(to: backPhotoOutput, device: backDevice)
         Self.applyMaxPhotoDimensions(to: frontPhotoOutput, device: frontDevice)
+        CrashLogger.breadcrumb("双摄: 照片输出已添加")
 
         guard addConnection(input: back, output: backVideoOutput, mirrored: false) != nil,
               addConnection(input: front, output: frontVideoOutput, mirrored: true) != nil else {
@@ -167,6 +182,7 @@ final class DualCameraService: NSObject, CameraServicing {
               addConnection(input: front, output: frontPhotoOutput, mirrored: true) != nil else {
             throw CameraError.configurationFailed("无法连接前后摄像头拍照")
         }
+        CrashLogger.breadcrumb("双摄: 连接已建立")
 
         // 双路 1080p 超出硬件预算时退回 720p。
         if session.hardwareCost > 1.0 {
@@ -178,6 +194,7 @@ final class DualCameraService: NSObject, CameraServicing {
             Self.applyMaxPhotoDimensions(to: frontPhotoOutput, device: frontDevice)
         }
         Log.camera.info("双摄硬件占用: \(self.session.hardwareCost)")
+        CrashLogger.breadcrumb("双摄: 硬件占用 \(self.session.hardwareCost)")
         guard session.hardwareCost <= 1.0 else {
             throw CameraError.configurationFailed("双摄超出硬件能力，请关闭其他相机应用后重试")
         }
@@ -200,9 +217,11 @@ final class DualCameraService: NSObject, CameraServicing {
         let connection = AVCaptureConnection(inputPorts: [port], output: output)
         guard session.canAddConnection(connection) else {
             Log.camera.error("双摄连接添加失败: \(type(of: output))")
+            CrashLogger.breadcrumb("双摄: 连接被拒绝 \(type(of: output))")
             return nil
         }
         session.addConnection(connection)
+        CrashLogger.breadcrumb("双摄: 连接完成 \(type(of: output))")
         // 多摄会话里必须先关闭自动镜像，再手动设置，否则会抛异常。
         if connection.isVideoMirroringSupported {
             connection.automaticallyAdjustsVideoMirroring = false
@@ -219,10 +238,12 @@ final class DualCameraService: NSObject, CameraServicing {
     func setCaptureMode(_ mode: CaptureMode) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             sessionQueue.async {
+                CrashLogger.breadcrumb("双摄: 切换模式 \(mode)")
                 do {
                     try self.applyCaptureMode(mode)
                     continuation.resume()
                 } catch {
+                    CrashLogger.breadcrumb("双摄: 切换模式失败 \(error.localizedDescription)")
                     continuation.resume(throwing: error)
                 }
             }
@@ -364,6 +385,7 @@ final class DualCameraService: NSObject, CameraServicing {
                 self.startContinuation = continuation
                 self.recordingLock.unlock()
 
+                CrashLogger.breadcrumb("双摄: 开始录制")
                 self.backMovieOutput.startRecording(to: backURL, recordingDelegate: self)
                 self.frontMovieOutput.startRecording(to: frontURL, recordingDelegate: self)
             }
@@ -407,6 +429,7 @@ final class DualCameraService: NSObject, CameraServicing {
 
                 let backSettings = self.makePhotoSettings(for: self.backPhotoOutput, flash: self.flashMode)
                 let frontSettings = self.makePhotoSettings(for: self.frontPhotoOutput, flash: .off)
+                CrashLogger.breadcrumb("双摄: 拍照 capturePhoto")
                 self.backPhotoOutput.capturePhoto(with: backSettings, delegate: self)
                 self.frontPhotoOutput.capturePhoto(with: frontSettings, delegate: self)
             }
@@ -577,9 +600,9 @@ final class DualCameraService: NSObject, CameraServicing {
             let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             return dims.width <= 1920 && dims.height <= 1080 && supports30(format)
         }
-        let best = exact.max { photoArea($0) < photoArea($1) }
-            ?? capped.max { photoArea($0) < photoArea($1) }
-            ?? multiCam.max { photoArea($0) < photoArea($1) }
+        let best = exact.max { formatScore($0) < formatScore($1) }
+            ?? capped.max { formatScore($0) < formatScore($1) }
+            ?? multiCam.max { formatScore($0) < formatScore($1) }
         guard let best else { return }
 
         do {
@@ -599,6 +622,26 @@ final class DualCameraService: NSObject, CameraServicing {
     private static func photoArea(_ format: AVCaptureDevice.Format) -> Int {
         format.supportedMaxPhotoDimensions.reduce(0) { partial, dims in
             max(partial, Int(dims.width) * Int(dims.height))
+        }
+    }
+
+    /// 同尺寸下优先 30fps 常规格式，避免选到 60fps 以上的高速格式。
+    private static func formatScore(_ format: AVCaptureDevice.Format) -> (Int, Int) {
+        let maxRate = format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+        return (photoArea(format), -Int(maxRate))
+    }
+
+    private static func configureFocus(for device: AVCaptureDevice) {
+        guard (try? device.lockForConfiguration()) != nil else { return }
+        defer { device.unlockForConfiguration() }
+
+        if device.isFocusModeSupported(.continuousAutoFocus) {
+            device.focusMode = .continuousAutoFocus
+        } else if device.isFocusModeSupported(.autoFocus) {
+            device.focusMode = .autoFocus
+        }
+        if device.isExposureModeSupported(.continuousAutoExposure) {
+            device.exposureMode = .continuousAutoExposure
         }
     }
 

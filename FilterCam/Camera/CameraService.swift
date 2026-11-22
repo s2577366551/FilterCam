@@ -38,15 +38,19 @@ final class CameraService: NSObject, CameraServicing {
     func start() async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             sessionQueue.async {
+                CrashLogger.breadcrumb("单摄: 开始启动")
                 do {
                     try self.configureIfNeeded()
                     self.observeSessionIfNeeded()
                     if !self.session.isRunning {
+                        CrashLogger.breadcrumb("单摄: startRunning")
                         self.session.startRunning()
+                        CrashLogger.breadcrumb("单摄: startRunning 返回")
                     }
                     self.onStateChange?(.running)
                     continuation.resume()
                 } catch {
+                    CrashLogger.breadcrumb("单摄: 启动失败 \(error.localizedDescription)")
                     continuation.resume(throwing: error)
                 }
             }
@@ -56,12 +60,14 @@ final class CameraService: NSObject, CameraServicing {
     func stop() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             sessionQueue.async {
+                CrashLogger.breadcrumb("单摄: 开始停止")
                 if self.movieOutput.isRecording {
                     self.movieOutput.stopRecording()
                 }
                 if self.session.isRunning {
                     self.session.stopRunning()
                 }
+                CrashLogger.breadcrumb("单摄: 已停止")
                 self.onStateChange?(.idle)
                 continuation.resume()
             }
@@ -524,6 +530,7 @@ final class CameraService: NSObject, CameraServicing {
         }
         session.addInput(input)
         videoInput = input
+        Self.configureFocus(for: device)
 
         videoOutput.alwaysDiscardsLateVideoFrames = true
         videoOutput.videoSettings = [
@@ -580,22 +587,35 @@ final class CameraService: NSObject, CameraServicing {
             }
         }
         // 换摄像头后回到连续自动对焦，避免沿用上一颗镜头的锁定状态。
+        Self.configureFocus(for: device)
         if (try? device.lockForConfiguration()) != nil {
-            if device.isFocusModeSupported(.continuousAutoFocus) {
-                device.focusMode = .continuousAutoFocus
-            }
-            if device.isExposureModeSupported(.continuousAutoExposure) {
-                device.exposureMode = .continuousAutoExposure
-            }
+            device.videoZoomFactor = max(1, device.minAvailableVideoZoomFactor)
             device.unlockForConfiguration()
         }
         applyConnectionSettings(position: newPosition)
         applyMovieConnectionSettings()
     }
 
+    /// 打开自动对焦/自动曝光。前置镜头默认可能是锁定状态，会一直发虚。
+    private static func configureFocus(for device: AVCaptureDevice) {
+        guard (try? device.lockForConfiguration()) != nil else { return }
+        defer { device.unlockForConfiguration() }
+
+        if device.isFocusModeSupported(.continuousAutoFocus) {
+            device.focusMode = .continuousAutoFocus
+        } else if device.isFocusModeSupported(.autoFocus) {
+            device.focusMode = .autoFocus
+        }
+        if device.isExposureModeSupported(.continuousAutoExposure) {
+            device.exposureMode = .continuousAutoExposure
+        }
+    }
+
     // MARK: - 格式选择
 
     /// 在视频尺寸不超过 12MP 的格式里，挑拍照尺寸最大的那个。
+    /// 同分时优先视频分辨率更高的格式：前置镜头很多格式都能拍 12MP，
+    /// 如果选到 720p 高速格式，预览就会被放大得发虚。
     private static func bestPhotoFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
         let candidates = device.formats.filter { format in
             let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
@@ -606,8 +626,17 @@ final class CameraService: NSObject, CameraServicing {
             return maxRate >= 24
         }
         return candidates.max { lhs, rhs in
-            photoArea(lhs) < photoArea(rhs)
+            formatScore(lhs) < formatScore(rhs)
         }
+    }
+
+    /// 排序优先级：拍照面积 → 视频分辨率 → 避开 120/240fps 高速格式。
+    private static func formatScore(_ format: AVCaptureDevice.Format) -> (Int, Int, Int) {
+        let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+        let pixels = Int(dims.width) * Int(dims.height)
+        let maxRate = format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+        let isHighSpeed = maxRate > 60 ? 0 : 1
+        return (photoArea(format), pixels, isHighSpeed)
     }
 
     private static func photoArea(_ format: AVCaptureDevice.Format) -> Int {

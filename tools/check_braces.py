@@ -14,6 +14,10 @@ files = [
     "FilterCam/Camera/DualCameraService.swift",
     "FilterCam/Photo/PiPLayout.swift",
     "FilterCam/Filter/OfficialLUTLibrary.swift",
+    "FilterCam/Core/CrashLogger.swift",
+    "FilterCam/UI/CrashReportView.swift",
+    "FilterCam/App/RootView.swift",
+    "FilterCam/App/FilterCamApp.swift",
 ]
 
 for f in files:

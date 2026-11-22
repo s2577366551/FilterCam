@@ -220,9 +220,11 @@ final class CameraViewModel: ObservableObject {
         let turningOn = !isDualCameraEnabled
 
         Task {
+            CrashLogger.breadcrumb("切换双摄: \(turningOn ? "开启" : "关闭")")
             activeCamera.onFrame = nil
             activeCamera.onStateChange = nil
             await activeCamera.stop()
+            CrashLogger.breadcrumb("切换双摄: 旧会话已停止")
             if turningOn {
                 if isLivePhotoEnabled {
                     _ = await activeCamera.setLivePhotoEnabled(false)
@@ -239,6 +241,7 @@ final class CameraViewModel: ObservableObject {
 
             resetFrameState()
             bindCamera()
+            CrashLogger.breadcrumb("切换双摄: 准备启动新会话")
             do {
                 try await activeCamera.start()
                 activeCamera.setFlashMode(flashMode)
@@ -250,6 +253,7 @@ final class CameraViewModel: ObservableObject {
                 }
                 showToast(turningOn ? "前后双摄已开启" : "已关闭前后双摄")
             } catch {
+                CrashLogger.breadcrumb("切换双摄失败: \(error.localizedDescription)")
                 showToast(error.localizedDescription)
             }
             Haptics.selection()
