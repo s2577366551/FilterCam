@@ -9,9 +9,13 @@ final class CameraService: NSObject, CameraServicing {
     private let videoQueue = DispatchQueue(label: "com.filtercam.camera.video", qos: .userInitiated)
     private let videoOutput = AVCaptureVideoDataOutput()
     private let photoOutput = AVCapturePhotoOutput()
+    private let movieOutput = AVCaptureMovieFileOutput()
 
     private var videoInput: AVCaptureDeviceInput?
+    private var audioInput: AVCaptureDeviceInput?
     private var position: AVCaptureDevice.Position = .back
+    private var captureMode: CaptureMode = .photo
+    private var isMovieOutputAdded = false
     private var flashMode: FlashMode = .auto
     private var photoResolution: PhotoResolution = .standard
     private var livePhotoEnabled = false
@@ -22,6 +26,11 @@ final class CameraService: NSObject, CameraServicing {
     private var isObserving = false
     private let photoLock = NSLock()
     private var photoContinuation: CheckedContinuation<CapturedPhoto, Error>?
+    private let recordingLock = NSLock()
+    private var startRecordingContinuation: CheckedContinuation<Void, Error>?
+    private var stopRecordingContinuation: CheckedContinuation<RecordedVideo, Error>?
+    private var recordingStartDate: Date?
+    private var recordingURL: URL?
 
     var onFrame: ((CIImage) -> Void)?
     var onStateChange: ((CameraRuntimeState) -> Void)?
@@ -46,6 +55,9 @@ final class CameraService: NSObject, CameraServicing {
 
     func stop() {
         sessionQueue.async {
+            if self.movieOutput.isRecording {
+                self.movieOutput.stopRecording()
+            }
             if self.session.isRunning {
                 self.session.stopRunning()
             }
@@ -90,6 +102,12 @@ final class CameraService: NSObject, CameraServicing {
 
     private func applyLivePhotoEnabled(_ enabled: Bool) -> Bool {
         guard let device = videoInput?.device else { return false }
+        // 视频模式下没有实况照片。
+        guard captureMode == .photo else {
+            photoOutput.isLivePhotoCaptureEnabled = false
+            livePhotoEnabled = false
+            return false
+        }
 
         if !enabled {
             session.beginConfiguration()
@@ -130,6 +148,151 @@ final class CameraService: NSObject, CameraServicing {
         photoOutput.isLivePhotoCaptureEnabled = supported
         livePhotoEnabled = supported
         return supported
+    }
+
+    // MARK: - 照片 / 视频模式
+
+    func setCaptureMode(_ mode: CaptureMode) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            sessionQueue.async {
+                do {
+                    try self.applyCaptureMode(mode)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private func applyCaptureMode(_ mode: CaptureMode) throws {
+        guard mode != captureMode else { return }
+        guard !movieOutput.isRecording else {
+            throw CameraError.captureFailed("录制中不能切换模式")
+        }
+
+        session.beginConfiguration()
+        do {
+            switch mode {
+            case .video:
+                photoOutput.isLivePhotoCaptureEnabled = false
+                livePhotoEnabled = false
+
+                // 视频走系统视频预设，保证 MovieFileOutput 能正常编码。
+                if session.canSetSessionPreset(.hd4K3840x2160) {
+                    session.sessionPreset = .hd4K3840x2160
+                } else if session.canSetSessionPreset(.hd1920x1080) {
+                    session.sessionPreset = .hd1920x1080
+                } else {
+                    session.sessionPreset = .high
+                }
+
+                addAudioInputIfPossible()
+
+                if !isMovieOutputAdded {
+                    guard session.canAddOutput(movieOutput) else {
+                        throw CameraError.configurationFailed("无法添加录像输出")
+                    }
+                    session.addOutput(movieOutput)
+                    movieOutput.movieFragmentInterval = .invalid
+                    isMovieOutputAdded = true
+                }
+
+            case .photo:
+                if isMovieOutputAdded {
+                    session.removeOutput(movieOutput)
+                    isMovieOutputAdded = false
+                }
+                if let audioInput {
+                    session.removeInput(audioInput)
+                    self.audioInput = nil
+                }
+
+                // 恢复拍照格式：视频尺寸不超过 12MP，同时拿到最大静态拍照尺寸。
+                session.sessionPreset = .inputPriority
+                if let device = videoInput?.device,
+                   let format = Self.bestPhotoFormat(for: device) {
+                    Self.applyFormat(format, to: device)
+                    Self.applyMaxPhotoDimensions(to: photoOutput, device: device)
+                } else {
+                    session.sessionPreset = .photo
+                }
+            }
+            session.commitConfiguration()
+        } catch {
+            session.commitConfiguration()
+            throw error
+        }
+
+        captureMode = mode
+
+        applyConnectionSettings(position: position)
+        if mode == .video {
+            applyMovieConnectionSettings()
+        }
+    }
+
+    /// 只在用户已授权麦克风时加入音频输入；拒绝授权也能录无声视频。
+    private func addAudioInputIfPossible() {
+        guard audioInput == nil else { return }
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
+              let device = AVCaptureDevice.default(for: .audio),
+              let input = try? AVCaptureDeviceInput(device: device),
+              session.canAddInput(input) else { return }
+        session.addInput(input)
+        audioInput = input
+    }
+
+    private func applyMovieConnectionSettings() {
+        guard let connection = movieOutput.connection(with: .video) else { return }
+        if connection.isVideoRotationAngleSupported(90) {
+            connection.videoRotationAngle = 90
+        }
+        connection.isVideoMirrored = position == .front
+        if connection.isVideoStabilizationSupported {
+            connection.preferredVideoStabilizationMode = .auto
+        }
+    }
+
+    func startRecording() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            sessionQueue.async {
+                guard self.captureMode == .video else {
+                    continuation.resume(throwing: CameraError.captureFailed("当前不是视频模式"))
+                    return
+                }
+                guard !self.movieOutput.isRecording else {
+                    continuation.resume(throwing: CameraError.captureFailed("正在录制中"))
+                    return
+                }
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("filtercam-record-\(UUID().uuidString).mov")
+                self.recordingURL = url
+                self.recordingStartDate = Date()
+
+                self.recordingLock.lock()
+                self.startRecordingContinuation = continuation
+                self.recordingLock.unlock()
+
+                self.applyMovieConnectionSettings()
+                self.movieOutput.startRecording(to: url, recordingDelegate: self)
+            }
+        }
+    }
+
+    func stopRecording() async throws -> RecordedVideo {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<RecordedVideo, Error>) in
+            sessionQueue.async {
+                guard self.movieOutput.isRecording else {
+                    continuation.resume(throwing: CameraError.captureFailed("当前没有在录制"))
+                    return
+                }
+                self.recordingLock.lock()
+                self.stopRecordingContinuation = continuation
+                self.recordingLock.unlock()
+                self.movieOutput.stopRecording()
+            }
+        }
     }
 
     func capturePhoto() async throws -> CapturedPhoto {
@@ -383,13 +546,15 @@ final class CameraService: NSObject, CameraServicing {
         session.addInput(input)
         videoInput = input
         position = newPosition
-        if let format = Self.bestPhotoFormat(for: device) {
-            Self.applyFormat(format, to: device)
-        }
-        Self.applyMaxPhotoDimensions(to: photoOutput, device: device)
-        // 实况模式下拍照上限必须保持在 12MP 档。
-        if livePhotoEnabled, let standard = Self.standardPhotoDimensions(for: device.activeFormat) {
-            photoOutput.maxPhotoDimensions = standard
+        if captureMode == .photo {
+            if let format = Self.bestPhotoFormat(for: device) {
+                Self.applyFormat(format, to: device)
+            }
+            Self.applyMaxPhotoDimensions(to: photoOutput, device: device)
+            // 实况模式下拍照上限必须保持在 12MP 档。
+            if livePhotoEnabled, let standard = Self.standardPhotoDimensions(for: device.activeFormat) {
+                photoOutput.maxPhotoDimensions = standard
+            }
         }
         // 换摄像头后回到连续自动对焦，避免沿用上一颗镜头的锁定状态。
         if (try? device.lockForConfiguration()) != nil {
@@ -402,6 +567,7 @@ final class CameraService: NSObject, CameraServicing {
             device.unlockForConfiguration()
         }
         applyConnectionSettings(position: newPosition)
+        applyMovieConnectionSettings()
     }
 
     // MARK: - 格式选择
@@ -530,6 +696,77 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
     ) {
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         onFrame?(CIImage(cvPixelBuffer: buffer))
+    }
+}
+
+extension CameraService: AVCaptureFileOutputRecordingDelegate {
+    func fileOutput(
+        _ output: AVCaptureFileOutput,
+        didStartRecordingTo fileURL: URL,
+        from connections: [AVCaptureConnection]
+    ) {
+        recordingLock.lock()
+        let continuation = startRecordingContinuation
+        startRecordingContinuation = nil
+        recordingLock.unlock()
+        continuation?.resume()
+    }
+
+    func fileOutput(
+        _ output: AVCaptureFileOutput,
+        didFinishRecordingTo outputFileURL: URL,
+        from connections: [AVCaptureConnection],
+        error: Error?
+    ) {
+        recordingLock.lock()
+        let start = startRecordingContinuation
+        startRecordingContinuation = nil
+        let stop = stopRecordingContinuation
+        stopRecordingContinuation = nil
+        recordingStartDate = nil
+        recordingURL = nil
+        recordingLock.unlock()
+
+        // AVFoundation 用这个 key 表示「虽然报错，但文件是完整的」。
+        let finishedOK: Bool = {
+            guard let error = error as NSError? else { return true }
+            if let flag = error.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool {
+                return flag
+            }
+            return false
+        }()
+
+        if let start {
+            start.resume(throwing: error ?? CameraError.captureFailed("录制失败"))
+            try? FileManager.default.removeItem(at: outputFileURL)
+            return
+        }
+
+        guard let stop else {
+            // 没有等待方（例如异常中断），清掉临时文件。
+            try? FileManager.default.removeItem(at: outputFileURL)
+            return
+        }
+
+        guard finishedOK, FileManager.default.fileExists(atPath: outputFileURL.path) else {
+            try? FileManager.default.removeItem(at: outputFileURL)
+            stop.resume(
+                throwing: CameraError.captureFailed(error?.localizedDescription ?? "录制失败")
+            )
+            return
+        }
+
+        let asset = AVURLAsset(url: outputFileURL)
+        let track = asset.tracks(withMediaType: .video).first
+        let natural = track?.naturalSize ?? .zero
+        stop.resume(
+            returning: RecordedVideo(
+                url: outputFileURL,
+                duration: asset.duration,
+                pixelWidth: Int(abs(natural.width)),
+                pixelHeight: Int(abs(natural.height))
+            )
+        )
     }
 }
 

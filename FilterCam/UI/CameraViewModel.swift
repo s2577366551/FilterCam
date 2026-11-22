@@ -1,3 +1,5 @@
+import AVFoundation
+import Combine
 import CoreImage
 import SwiftUI
 import UIKit
@@ -29,15 +31,20 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var manualFocus: Float = 0.5
     @Published private(set) var photoResolution: PhotoResolution = .standard
     @Published private(set) var isLivePhotoEnabled = false
+    @Published private(set) var captureMode: CaptureMode = .photo
+    @Published private(set) var isRecording = false
+    @Published private(set) var recordingDuration: TimeInterval = 0
+    @Published var isWatermarkSheetPresented = false
     @Published private(set) var lastPhoto: UIImage?
     @Published private(set) var lastPhotoFileURL: URL?
     @Published var isPreviewPresented = false
     @Published private(set) var isCapturing = false
+    @Published private(set) var isProcessingVideo = false
     @Published private(set) var pendingSaveCount = 0
 
-    /// 快门是否该显示忙碌：正在触发快门，或排队保存的照片太多。
+    /// 快门是否该显示忙碌：正在触发快门、正在导出视频，或排队保存的照片太多。
     var isShutterBusy: Bool {
-        isCapturing || pendingSaveCount >= maxPendingSaves
+        isCapturing || isProcessingVideo || pendingSaveCount >= maxPendingSaves
     }
 
     /// 最高画质单张占用内存大，排队数量要收窄。
@@ -49,6 +56,7 @@ final class CameraViewModel: ObservableObject {
     let previewRenderer: PreviewRenderer?
     let filterStore: FilterStore
     let userLUTLibrary: UserLUTLibrary
+    let watermarkStore = WatermarkStore.shared
 
     private let camera: CameraServicing
     private let permission: CameraPermissionProviding
@@ -65,9 +73,11 @@ final class CameraViewModel: ObservableObject {
     private var didReceiveFrame = false
     private var frameSize: CGSize = .zero
     private var reticleTask: Task<Void, Never>?
+    private var recordingTimer: Task<Void, Never>?
     private var saveChain: Task<Void, Never>?
     private var adjustmentsByPreset: [String: FilterAdjustments] = [:]
     private var lastFrame: CIImage?
+    private var watermarkCancellable: AnyCancellable?
 
     init(
         camera: CameraServicing = CameraService(),
@@ -93,6 +103,11 @@ final class CameraViewModel: ObservableObject {
         self.filterStore = FilterStore()
         self.userLUTLibrary = library
 
+        // 水印设置变化时刷新界面（顶栏的开关状态）。
+        watermarkCancellable = watermarkStore.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+
         bindCamera()
     }
 
@@ -113,6 +128,10 @@ final class CameraViewModel: ObservableObject {
     }
 
     func onDisappear() {
+        if isRecording {
+            stopRecordingTimer()
+            isRecording = false
+        }
         camera.stop()
     }
 
@@ -149,6 +168,10 @@ final class CameraViewModel: ObservableObject {
     }
 
     func flipCamera() {
+        guard !isRecording else {
+            showToast("录制中不能切换摄像头")
+            return
+        }
         Task {
             do {
                 try await camera.switchCamera()
@@ -164,6 +187,148 @@ final class CameraViewModel: ObservableObject {
                 Log.camera.error("切换摄像头失败: \(error.localizedDescription)")
             }
         }
+    }
+
+    // MARK: - 照片 / 视频模式
+
+    func selectCaptureMode(_ mode: CaptureMode) {
+        guard mode != captureMode, !isRecording, !isCapturing, !isProcessingVideo else { return }
+        guard state == .running else { return }
+        Task { await applyCaptureMode(mode) }
+    }
+
+    private func applyCaptureMode(_ mode: CaptureMode) async {
+        // 视频模式没有实况，先关掉再切，避免拍照格式被改回去。
+        if mode == .video, isLivePhotoEnabled {
+            _ = await camera.setLivePhotoEnabled(false)
+            isLivePhotoEnabled = false
+        }
+        if mode == .video {
+            await requestMicrophoneIfNeeded()
+        }
+        do {
+            try await camera.setCaptureMode(mode)
+            captureMode = mode
+            settingsLock.lock()
+            didCaptureThumbnailSource = false
+            frameCount = 0
+            settingsLock.unlock()
+            Haptics.selection()
+        } catch {
+            showToast(error.localizedDescription)
+        }
+    }
+
+    private func requestMicrophoneIfNeeded() async {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined else { return }
+        _ = await AVCaptureDevice.requestAccess(for: .audio)
+    }
+
+    func toggleRecording() {
+        if isRecording {
+            finishRecording()
+        } else {
+            beginRecording()
+        }
+    }
+
+    private func beginRecording() {
+        guard !isRecording else { return }
+        isRecording = true
+        recordingDuration = 0
+        startRecordingTimer()
+        Haptics.shutter()
+        Task {
+            do {
+                try await camera.startRecording()
+            } catch {
+                isRecording = false
+                stopRecordingTimer()
+                showToast(error.localizedDescription)
+            }
+        }
+    }
+
+    private func finishRecording() {
+        guard isRecording, !isProcessingVideo else { return }
+        stopRecordingTimer()
+        isRecording = false
+        let fallbackDuration = recordingDuration
+        let settings = currentSettings()
+        let watermark = watermarkStore.effectiveText
+        isProcessingVideo = true
+        pendingSaveCount += 1
+
+        Task {
+            defer {
+                pendingSaveCount = max(0, pendingSaveCount - 1)
+                isProcessingVideo = false
+            }
+            do {
+                let video = try await camera.stopRecording()
+                isRecording = false
+                showToast("正在保存视频…")
+
+                let pipeline = filterPipeline
+                let info = try await photoSaver.saveVideo(
+                    at: video.url,
+                    watermark: watermark
+                ) { image in
+                    pipeline.process(
+                        image,
+                        preset: settings.preset,
+                        intensity: settings.intensity,
+                        adjustments: settings.adjustments
+                    )
+                }
+
+                lastPhoto = Self.makeVideoThumbnail(at: info.fileURL)
+                if let previous = lastPhotoFileURL {
+                    try? FileManager.default.removeItem(at: previous)
+                }
+                lastPhotoFileURL = info.fileURL
+                let duration = info.duration > 0 ? info.duration : fallbackDuration
+                showToast("已保存视频 \(Self.durationText(duration))")
+            } catch {
+                isRecording = false
+                showToast(error.localizedDescription)
+            }
+        }
+    }
+
+    private func startRecordingTimer() {
+        stopRecordingTimer()
+        let start = Date()
+        recordingTimer = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(200))
+                guard let self, !Task.isCancelled else { return }
+                self.recordingDuration = Date().timeIntervalSince(start)
+            }
+        }
+    }
+
+    private func stopRecordingTimer() {
+        recordingTimer?.cancel()
+        recordingTimer = nil
+    }
+
+    static func durationText(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds.rounded()))
+        return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+
+    private static func makeVideoThumbnail(at url: URL?) -> UIImage? {
+        guard let url else { return nil }
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 1024, height: 1024)
+        let time = CMTime(value: 1, timescale: 10)
+        guard let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) else {
+            return nil
+        }
+        return UIImage(cgImage: cgImage)
     }
 
     // MARK: - 对焦
@@ -260,6 +425,7 @@ final class CameraViewModel: ObservableObject {
     func capture() {
         guard !isCapturing, pendingSaveCount < maxPendingSaves else { return }
         isCapturing = true
+        let watermark = watermarkStore.effectiveText
         Task {
             defer { isCapturing = false }
             do {
@@ -269,7 +435,7 @@ final class CameraViewModel: ObservableObject {
                 let settings = currentSettings()
                 // 立刻出缩略图，让用户马上看到拍到了什么。
                 lastPhoto = makePreviewImage(from: captured, settings: settings)
-                enqueueSave(captured, settings: settings)
+                enqueueSave(captured, settings: settings, watermark: watermark)
             } catch {
                 showToast(error.localizedDescription)
             }
@@ -279,25 +445,30 @@ final class CameraViewModel: ObservableObject {
     /// 保存排队执行：快门不必等编码和写相册完成，可以继续拍。
     private func enqueueSave(
         _ captured: CapturedPhoto,
-        settings: (preset: FilterPreset, intensity: Float, adjustments: FilterAdjustments)
+        settings: (preset: FilterPreset, intensity: Float, adjustments: FilterAdjustments),
+        watermark: String?
     ) {
         pendingSaveCount += 1
         let previous = saveChain
         saveChain = Task { [weak self] in
             await previous?.value
             guard let self else { return }
-            await self.performSave(captured, settings: settings)
+            await self.performSave(captured, settings: settings, watermark: watermark)
             self.pendingSaveCount = max(0, self.pendingSaveCount - 1)
         }
     }
 
     private func performSave(
         _ captured: CapturedPhoto,
-        settings: (preset: FilterPreset, intensity: Float, adjustments: FilterAdjustments)
+        settings: (preset: FilterPreset, intensity: Float, adjustments: FilterAdjustments),
+        watermark: String?
     ) async {
         do {
             let pipeline = filterPipeline
-            let info = try await photoSaver.save(captured) { image in
+            let info = try await photoSaver.save(
+                captured,
+                watermark: watermark
+            ) { image in
                 pipeline.process(
                     image,
                     preset: settings.preset,
@@ -348,11 +519,12 @@ final class CameraViewModel: ObservableObject {
             let isFirstFrame = !self.didReceiveFrame
             if isFirstFrame {
                 self.didReceiveFrame = true
-                self.frameSize = previewSource.extent.size
             }
+            let previousSize = self.frameSize
+            self.frameSize = previewSource.extent.size
             let size = self.frameSize
             self.settingsLock.unlock()
-            if isFirstFrame {
+            if isFirstFrame || size != previousSize {
                 DispatchQueue.main.async {
                     self.hasReceivedFrame = true
                     self.previewContentSize = size

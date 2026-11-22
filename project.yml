@@ -34,7 +34,8 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UIRequiresFullScreen: true
-        NSCameraUsageDescription: 用于拍摄带胶片滤镜的照片。
+        NSCameraUsageDescription: 用于拍摄带胶片滤镜的照片和视频。
+        NSMicrophoneUsageDescription: 用于录制带滤镜的视频声音。
         NSPhotoLibraryAddUsageDescription: 用于将成片保存到相册。
   FilterCamTests:
     type: bundle.unit-test

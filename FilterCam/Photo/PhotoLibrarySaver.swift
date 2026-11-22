@@ -13,6 +13,14 @@ struct SavedPhoto {
     let fileURL: URL?
 }
 
+struct SavedVideo {
+    let pixelWidth: Int
+    let pixelHeight: Int
+    let duration: TimeInterval
+    /// 成片的临时路径，用于分享。
+    let fileURL: URL?
+}
+
 enum PhotoSaveError: LocalizedError {
     case notAuthorized
     case encodingFailed
@@ -42,6 +50,7 @@ final class PhotoLibrarySaver {
 
     func save(
         _ captured: CapturedPhoto,
+        watermark: String? = nil,
         applying transform: @escaping (CIImage) -> CIImage
     ) async throws -> SavedPhoto {
         try await ensureAuthorization()
@@ -51,7 +60,13 @@ final class PhotoLibrarySaver {
             queue.async {
                 autoreleasepool {
                     do {
-                        continuation.resume(returning: try self.encodeStill(captured, transform: transform))
+                        continuation.resume(
+                            returning: try self.encodeStill(
+                                captured,
+                                watermark: watermark,
+                                transform: transform
+                            )
+                        )
                     } catch {
                         continuation.resume(throwing: error)
                     }
@@ -68,6 +83,7 @@ final class PhotoLibrarySaver {
                 movieURL: movieURL,
                 captured: captured,
                 shareURL: shareURL,
+                watermark: watermark,
                 transform: transform
             )
         }
@@ -82,6 +98,91 @@ final class PhotoLibrarySaver {
             isLivePhoto: false,
             fileURL: shareURL
         )
+    }
+
+    // MARK: - 视频
+
+    /// 把录制好的原始视频逐帧套滤镜 + 水印，再写入相册。
+    /// 导出失败时退回保存原始视频，至少不丢素材。
+    func saveVideo(
+        at url: URL,
+        watermark: String?,
+        applying transform: @escaping (CIImage) -> CIImage
+    ) async throws -> SavedVideo {
+        try await ensureAuthorization()
+
+        let asset = AVURLAsset(url: url)
+        let seconds = CMTimeGetSeconds(asset.duration)
+        let track = asset.tracks(withMediaType: .video).first
+        let natural = track?.naturalSize ?? .zero
+        let duration = seconds.isFinite ? max(seconds, 0) : 0
+
+        let filtered: URL
+        do {
+            filtered = try await filterMovie(
+                at: url,
+                identifier: nil,
+                watermark: watermark,
+                transform: transform
+            )
+        } catch {
+            Log.camera.error("视频滤镜导出失败，改存原片: \(error.localizedDescription)")
+            let shareURL = Self.copyForSharing(url, extension: "mov")
+            try await writeToLibrary { request in
+                let options = PHAssetResourceCreationOptions()
+                options.uniformTypeIdentifier = UTType.quickTimeMovie.identifier
+                request.addResource(with: .video, fileURL: url, options: options)
+            }
+            try? FileManager.default.removeItem(at: url)
+            return Self.makeVideoResult(
+                natural: natural,
+                duration: duration,
+                fileURL: shareURL
+            )
+        }
+
+        // 分享副本必须在清理临时文件前复制出来。
+        let shareURL = Self.copyForSharing(filtered, extension: "mov")
+        defer {
+            try? FileManager.default.removeItem(at: filtered)
+            try? FileManager.default.removeItem(at: url)
+        }
+
+        try await writeToLibrary { request in
+            let options = PHAssetResourceCreationOptions()
+            options.uniformTypeIdentifier = UTType.quickTimeMovie.identifier
+            request.addResource(with: .video, fileURL: filtered, options: options)
+        }
+
+        return Self.makeVideoResult(
+            natural: natural,
+            duration: duration,
+            fileURL: shareURL
+        )
+    }
+
+    private static func makeVideoResult(
+        natural: CGSize,
+        duration: TimeInterval,
+        fileURL: URL?
+    ) -> SavedVideo {
+        SavedVideo(
+            pixelWidth: Int(abs(natural.width)),
+            pixelHeight: Int(abs(natural.height)),
+            duration: duration,
+            fileURL: fileURL
+        )
+    }
+
+    private static func copyForSharing(_ url: URL, extension ext: String) -> URL? {
+        let target = FileManager.default.temporaryDirectory
+            .appendingPathComponent("filtercam-share-\(UUID().uuidString).\(ext)")
+        do {
+            try FileManager.default.copyItem(at: url, to: target)
+            return target
+        } catch {
+            return nil
+        }
     }
 
     /// 写一份临时 HEIC，供分享使用（全分辨率、最高质量）。
@@ -104,11 +205,13 @@ final class PhotoLibrarySaver {
         movieURL: URL,
         captured: CapturedPhoto,
         shareURL: URL?,
+        watermark: String?,
         transform: @escaping (CIImage) -> CIImage
     ) async throws -> SavedPhoto {
         let filteredMovie = try await filterMovie(
             at: movieURL,
             identifier: Self.livePhotoIdentifier(from: captured.metadata),
+            watermark: watermark,
             transform: transform
         )
         defer {
@@ -136,12 +239,19 @@ final class PhotoLibrarySaver {
     private func filterMovie(
         at url: URL,
         identifier: String?,
+        watermark: String? = nil,
         transform: @escaping (CIImage) -> CIImage
     ) async throws -> URL {
         let asset = AVURLAsset(url: url)
+
         let composition = AVVideoComposition(asset: asset) { request in
             let source = request.sourceImage
-            let output = transform(source).cropped(to: source.extent)
+            var output = transform(source).cropped(to: source.extent)
+            // 水印按实际帧尺寸生成，横竖屏都能贴准右下角。
+            if let watermark,
+               let layer = WatermarkRenderer.overlay(text: watermark, frame: source.extent) {
+                output = layer.composited(over: output)
+            }
             request.finish(with: output, context: self.context)
         }
 
@@ -207,6 +317,7 @@ final class PhotoLibrarySaver {
 
     private func encodeStill(
         _ captured: CapturedPhoto,
+        watermark: String?,
         transform: (CIImage) -> CIImage
     ) throws -> (Data, CGSize) {
         let oriented = captured.image.oriented(captured.orientation)
@@ -217,6 +328,10 @@ final class PhotoLibrarySaver {
             output = output.transformed(
                 by: CGAffineTransform(translationX: -extent.origin.x, y: -extent.origin.y)
             )
+        }
+        if let watermark,
+           let overlay = WatermarkRenderer.overlay(text: watermark, frame: output.extent) {
+            output = overlay.composited(over: output)
         }
         let size = output.extent.size
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()

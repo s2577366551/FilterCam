@@ -35,7 +35,7 @@ struct PhotoPreviewView: View {
                                 .frame(width: 36, height: 36)
                                 .background(.ultraThinMaterial, in: Circle())
                         }
-                        .accessibilityLabel("分享原图")
+                        .accessibilityLabel("分享")
                     }
 
                     Spacer()

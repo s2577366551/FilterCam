@@ -26,14 +26,18 @@ struct CameraScreen: View {
 
             VStack(spacing: 0) {
                 TopBar(
+                    mode: viewModel.captureMode,
                     flashMode: viewModel.flashMode,
                     isManualFocus: viewModel.isManualFocusEnabled,
                     resolutionBadge: viewModel.photoResolution.badge,
                     isLivePhoto: viewModel.isLivePhotoEnabled,
+                    isWatermarkEnabled: viewModel.watermarkStore.isEnabled,
+                    isRecording: viewModel.isRecording,
                     onFlash: { viewModel.toggleFlash() },
                     onManualFocus: { viewModel.toggleManualFocus() },
                     onResolution: { viewModel.togglePhotoResolution() },
                     onLivePhoto: { viewModel.toggleLivePhoto() },
+                    onWatermark: { viewModel.isWatermarkSheetPresented = true },
                     onFlip: { viewModel.flipCamera() }
                 )
                 .padding(.top, 8)
@@ -63,10 +67,23 @@ struct CameraScreen: View {
                     .padding(.bottom, 8)
                 }
 
+                modePicker
+                    .padding(.bottom, 6)
+
                 HStack(alignment: .center) {
                     lastPhotoButton
                     Spacer()
-                    ShutterButton(isBusy: viewModel.isShutterBusy) { viewModel.capture() }
+                    ShutterButton(
+                        isBusy: viewModel.isShutterBusy,
+                        isVideoMode: viewModel.captureMode == .video,
+                        isRecording: viewModel.isRecording
+                    ) {
+                        if viewModel.captureMode == .video {
+                            viewModel.toggleRecording()
+                        } else {
+                            viewModel.capture()
+                        }
+                    }
                     Spacer()
                     Color.clear
                         .frame(width: 50, height: 50)
@@ -85,6 +102,26 @@ struct CameraScreen: View {
             }
 
             overlay
+
+            if viewModel.isRecording {
+                VStack {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 8, height: 8)
+                        Text(CameraViewModel.durationText(viewModel.recordingDuration))
+                            .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Theme.overlay, in: Capsule())
+                    .padding(.top, 58)
+
+                    Spacer()
+                }
+                .allowsHitTesting(false)
+            }
 
             if viewModel.state == .running && !viewModel.hasReceivedFrame {
                 ProgressView("正在启动相机…")
@@ -114,6 +151,9 @@ struct CameraScreen: View {
                 onLUTChanged: { viewModel.refreshThumbnail(for: $0) }
             )
         }
+        .sheet(isPresented: $viewModel.isWatermarkSheetPresented) {
+            WatermarkSheet(store: viewModel.watermarkStore)
+        }
         .fullScreenCover(isPresented: $viewModel.isPreviewPresented) {
             if let photo = viewModel.lastPhoto {
                 PhotoPreviewView(
@@ -139,6 +179,26 @@ struct CameraScreen: View {
                 viewModel.onDisappear()
             @unknown default:
                 break
+            }
+        }
+    }
+
+    /// 照片 / 视频模式切换（苹果相机那种文字切换）。
+    private var modePicker: some View {
+        HStack(spacing: 26) {
+            ForEach(CaptureMode.allCases) { mode in
+                Button {
+                    viewModel.selectCaptureMode(mode)
+                } label: {
+                    Text(mode.displayName)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(
+                            viewModel.captureMode == mode ? Color.yellow : Theme.controlDim
+                        )
+                        .frame(minWidth: 44, minHeight: 28)
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isRecording)
             }
         }
     }
@@ -182,7 +242,10 @@ struct CameraScreen: View {
 
             if let url = viewModel.lastPhotoFileURL {
                 ShareLink(item: url) {
-                    Label("分享原图", systemImage: "square.and.arrow.up")
+                    Label(
+                        url.pathExtension.lowercased() == "mov" ? "分享视频" : "分享原图",
+                        systemImage: "square.and.arrow.up"
+                    )
                 }
             }
         }

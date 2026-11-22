@@ -14,6 +14,29 @@ struct CapturedPhoto {
     var pixelHeight: Int { Int(image.extent.height) }
 }
 
+/// 拍摄模式：照片 / 视频。
+enum CaptureMode: String, CaseIterable, Identifiable {
+    case photo
+    case video
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .photo: return "照片"
+        case .video: return "视频"
+        }
+    }
+}
+
+/// 一段录制完成的原始视频（尚未套滤镜）。
+struct RecordedVideo {
+    let url: URL
+    let duration: CMTime
+    let pixelWidth: Int
+    let pixelHeight: Int
+}
+
 enum CameraRuntimeState: Equatable {
     case idle
     case running
@@ -80,6 +103,13 @@ protocol CameraServicing: AnyObject {
     /// 开启/关闭实况，返回最终是否启用成功。
     func setLivePhotoEnabled(_ enabled: Bool) async -> Bool
     func capturePhoto() async throws -> CapturedPhoto
+
+    /// 切换照片 / 视频模式。
+    func setCaptureMode(_ mode: CaptureMode) async throws
+    /// 开始录制视频。返回时录制已经开始。
+    func startRecording() async throws
+    /// 停止录制并返回原始视频文件。
+    func stopRecording() async throws -> RecordedVideo
 
     /// 在指定设备坐标点自动对焦并自动曝光（坐标范围 0...1）。
     func focus(at devicePoint: CGPoint) async throws
