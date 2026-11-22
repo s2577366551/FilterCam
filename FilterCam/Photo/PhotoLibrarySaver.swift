@@ -274,8 +274,13 @@ final class PhotoLibrarySaver {
             .concatenating(CGAffineTransform(translationX: insetRect.minX, y: insetRect.minY))
         frontLayer.setTransform(frontTransform, at: .zero)
 
-        instruction.layerInstructions = [backLayer, frontLayer]
-        videoComposition.instructions = [instruction]
+        instruction.layerInstructions = [
+            backLayer as AVVideoCompositionLayerInstruction,
+            frontLayer as AVVideoCompositionLayerInstruction
+        ]
+        videoComposition.instructions = [
+            instruction as AVVideoCompositionInstructionProtocol
+        ]
 
         guard let export = AVAssetExportSession(
             asset: composition,

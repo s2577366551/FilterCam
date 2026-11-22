@@ -239,6 +239,8 @@ final class CameraViewModel: ObservableObject {
             bindCamera()
             do {
                 try await activeCamera.start()
+                activeCamera.setFlashMode(flashMode)
+                activeCamera.setPhotoResolution(photoResolution)
                 if captureMode == .video {
                     try? await activeCamera.setCaptureMode(.video)
                 }

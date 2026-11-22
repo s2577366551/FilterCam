@@ -167,7 +167,7 @@ final class DualCameraService: NSObject, CameraServicing {
             Self.applyVideoFormat(for: backDevice, width: 1280, height: 720)
             Self.applyVideoFormat(for: frontDevice, width: 1280, height: 720)
         }
-        Log.camera.info("双摄硬件占用: \(session.hardwareCost)")
+        Log.camera.info("双摄硬件占用: \(self.session.hardwareCost)")
 
         isConfigured = true
     }
