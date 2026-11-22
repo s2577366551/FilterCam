@@ -43,13 +43,14 @@ struct CameraScreen: View {
                     isManualFocus: viewModel.isManualFocusEnabled,
                     resolutionBadge: viewModel.photoResolution.badge,
                     isLivePhoto: viewModel.isLivePhotoEnabled,
-                    isWatermarkEnabled: viewModel.watermarkStore.isEnabled,
+                    isDualCamera: viewModel.isDualCameraEnabled,
+                    isDualSupported: DualCameraService.isSupported,
                     isRecording: viewModel.isRecording,
                     onFlash: { viewModel.toggleFlash() },
                     onManualFocus: { viewModel.toggleManualFocus() },
                     onResolution: { viewModel.togglePhotoResolution() },
                     onLivePhoto: { viewModel.toggleLivePhoto() },
-                    onWatermark: { viewModel.isWatermarkSheetPresented = true },
+                    onDual: { viewModel.toggleDualCamera() },
                     onFlip: { viewModel.flipCamera() }
                 )
                 .padding(.top, 8)
@@ -191,8 +192,7 @@ struct CameraScreen: View {
                     }
                 }
                 Spacer()
-                Color.clear
-                    .frame(width: 50, height: 50)
+                watermarkButton
             }
             .padding(.horizontal, 24)
 
@@ -206,6 +206,34 @@ struct CameraScreen: View {
                 .contentShape(Rectangle())
                 .onTapGesture { }
         )
+    }
+
+    /// 右下角：水印设置入口。
+    private var watermarkButton: some View {
+        Button {
+            viewModel.isWatermarkSheetPresented = true
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(
+                        viewModel.watermarkStore.isEnabled
+                            ? Color.yellow
+                            : Color.white.opacity(0.12)
+                    )
+                Image(systemName: "signature")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(
+                        viewModel.watermarkStore.isEnabled ? Color.black : Theme.control
+                    )
+            }
+            .frame(width: 50, height: 50)
+            .overlay(
+                Circle()
+                    .stroke(Color.white.opacity(0.22), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("水印设置")
     }
 
     /// 照片 / 视频模式切换（苹果相机那种文字切换）。

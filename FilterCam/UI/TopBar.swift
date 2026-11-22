@@ -6,13 +6,14 @@ struct TopBar: View {
     let isManualFocus: Bool
     let resolutionBadge: String
     let isLivePhoto: Bool
-    let isWatermarkEnabled: Bool
+    let isDualCamera: Bool
+    let isDualSupported: Bool
     let isRecording: Bool
     let onFlash: () -> Void
     let onManualFocus: () -> Void
     let onResolution: () -> Void
     let onLivePhoto: () -> Void
-    let onWatermark: () -> Void
+    let onDual: () -> Void
     let onFlip: () -> Void
 
     var body: some View {
@@ -57,11 +58,12 @@ struct TopBar: View {
             Spacer(minLength: 4)
 
             iconButton(
-                systemImage: "signature",
-                isActive: isWatermarkEnabled,
-                label: "水印设置",
-                action: onWatermark
+                systemImage: "rectangle.on.rectangle",
+                isActive: isDualCamera,
+                label: "前后双摄",
+                action: onDual
             )
+            .opacity(isDualSupported ? 1 : 0.35)
 
             iconButton(
                 systemImage: "arrow.triangle.2.circlepath.camera",
@@ -69,8 +71,8 @@ struct TopBar: View {
                 label: "切换摄像头",
                 action: onFlip
             )
-            .opacity(isRecording ? 0.4 : 1)
-            .disabled(isRecording)
+            .opacity(isRecording || isDualCamera ? 0.4 : 1)
+            .disabled(isRecording || isDualCamera)
         }
         .padding(.horizontal, 14)
     }

@@ -161,6 +161,143 @@ final class PhotoLibrarySaver {
         )
     }
 
+    /// 双摄视频：先把前后两段合成「后摄主画面 + 前摄右上角小窗」，再套滤镜和水印。
+    func saveDualVideo(
+        backURL: URL,
+        frontURL: URL,
+        watermark: String?,
+        applying transform: @escaping (CIImage) -> CIImage
+    ) async throws -> SavedVideo {
+        try await ensureAuthorization()
+
+        let backAsset = AVURLAsset(url: backURL)
+        let seconds = CMTimeGetSeconds(backAsset.duration)
+        let duration = seconds.isFinite ? max(seconds, 0) : 0
+        let natural = backAsset.tracks(withMediaType: .video).first?.naturalSize ?? .zero
+
+        let composed = try await composePiP(backURL: backURL, frontURL: frontURL)
+        defer { try? FileManager.default.removeItem(at: composed) }
+
+        let filtered = try await filterMovie(
+            at: composed,
+            identifier: nil,
+            watermark: watermark,
+            transform: transform
+        )
+        let shareURL = Self.copyForSharing(filtered, extension: "mov")
+        defer {
+            try? FileManager.default.removeItem(at: filtered)
+            try? FileManager.default.removeItem(at: backURL)
+            try? FileManager.default.removeItem(at: frontURL)
+        }
+
+        try await writeToLibrary { request in
+            let options = PHAssetResourceCreationOptions()
+            options.uniformTypeIdentifier = UTType.quickTimeMovie.identifier
+            request.addResource(with: .video, fileURL: filtered, options: options)
+        }
+
+        return SavedVideo(
+            pixelWidth: Int(abs(natural.width)),
+            pixelHeight: Int(abs(natural.height)),
+            duration: duration,
+            fileURL: shareURL
+        )
+    }
+
+    /// 把两段视频叠成画中画：后摄铺满，前摄贴右上角。
+    private func composePiP(backURL: URL, frontURL: URL) async throws -> URL {
+        let backAsset = AVURLAsset(url: backURL)
+        let frontAsset = AVURLAsset(url: frontURL)
+        guard let backTrack = backAsset.tracks(withMediaType: .video).first,
+              let frontTrack = frontAsset.tracks(withMediaType: .video).first else {
+            throw PhotoSaveError.saveFailed("视频轨道缺失")
+        }
+
+        let composition = AVMutableComposition()
+        guard let backCompositionTrack = composition.addMutableTrack(
+            withMediaType: .video,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ),
+        let frontCompositionTrack = composition.addMutableTrack(
+            withMediaType: .video,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            throw PhotoSaveError.saveFailed("无法创建视频轨道")
+        }
+
+        let backRange = CMTimeRange(start: .zero, duration: backAsset.duration)
+        try backCompositionTrack.insertTimeRange(backRange, of: backTrack, at: .zero)
+
+        let frontDuration = CMTimeMinimum(frontAsset.duration, backAsset.duration)
+        let frontRange = CMTimeRange(start: .zero, duration: frontDuration)
+        try frontCompositionTrack.insertTimeRange(frontRange, of: frontTrack, at: .zero)
+
+        if let audioTrack = backAsset.tracks(withMediaType: .audio).first,
+           let audioCompositionTrack = composition.addMutableTrack(
+               withMediaType: .audio,
+               preferredTrackID: kCMPersistentTrackID_Invalid
+           ) {
+            try? audioCompositionTrack.insertTimeRange(backRange, of: audioTrack, at: .zero)
+        }
+
+        let backTransform = backTrack.preferredTransform
+        let oriented = backTrack.naturalSize.applying(backTransform)
+        let renderSize = CGSize(width: abs(oriented.width), height: abs(oriented.height))
+
+        let videoComposition = AVMutableVideoComposition()
+        videoComposition.renderSize = renderSize
+        videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
+
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRange(start: .zero, duration: composition.duration)
+
+        let backLayer = AVMutableVideoCompositionLayerInstruction(assetTrack: backCompositionTrack)
+        backLayer.setTransform(backTransform, at: .zero)
+
+        let frontLayer = AVMutableVideoCompositionLayerInstruction(assetTrack: frontCompositionTrack)
+        let insetWidth = renderSize.width * PiPLayout.widthRatio
+        let insetHeight = insetWidth / (9.0 / 16.0)
+        let margin = renderSize.width * 0.035
+        // AV 视频坐标系原点在左上角。
+        let insetRect = CGRect(
+            x: renderSize.width - insetWidth - margin,
+            y: margin,
+            width: insetWidth,
+            height: insetHeight
+        )
+        let frontOriented = frontTrack.naturalSize.applying(frontTrack.preferredTransform)
+        let frontSize = CGSize(width: abs(frontOriented.width), height: abs(frontOriented.height))
+        let scale = max(insetRect.width / frontSize.width, insetRect.height / frontSize.height)
+        let frontTransform = frontTrack.preferredTransform
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+            .concatenating(CGAffineTransform(translationX: insetRect.minX, y: insetRect.minY))
+        frontLayer.setTransform(frontTransform, at: .zero)
+
+        instruction.layerInstructions = [backLayer, frontLayer]
+        videoComposition.instructions = [instruction]
+
+        guard let export = AVAssetExportSession(
+            asset: composition,
+            presetName: AVAssetExportPresetHighestQuality
+        ) else {
+            throw PhotoSaveError.saveFailed("无法创建双摄合成会话")
+        }
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("filtercam-dual-composed-\(UUID().uuidString).mov")
+        export.outputURL = outputURL
+        export.outputFileType = .mov
+        export.videoComposition = videoComposition
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            export.exportAsynchronously { continuation.resume() }
+        }
+        guard export.status == .completed else {
+            throw PhotoSaveError.saveFailed(export.error?.localizedDescription ?? "双摄视频合成失败")
+        }
+        return outputURL
+    }
+
     private static func makeVideoResult(
         natural: CGSize,
         duration: TimeInterval,

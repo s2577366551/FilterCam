@@ -32,6 +32,7 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var photoResolution: PhotoResolution = .standard
     @Published private(set) var isLivePhotoEnabled = false
     @Published private(set) var captureMode: CaptureMode = .photo
+    @Published private(set) var isDualCameraEnabled = false
     @Published private(set) var isRecording = false
     @Published private(set) var recordingDuration: TimeInterval = 0
     @Published var isWatermarkSheetPresented = false
@@ -58,7 +59,8 @@ final class CameraViewModel: ObservableObject {
     let userLUTLibrary: UserLUTLibrary
     let watermarkStore = WatermarkStore.shared
 
-    private let camera: CameraServicing
+    private let singleCamera: CameraServicing
+    private var activeCamera: CameraServicing
     private let permission: CameraPermissionProviding
     private let filterPipeline: FilterPipeline
     private let thumbnailService: ThumbnailService
@@ -93,7 +95,8 @@ final class CameraViewModel: ObservableObject {
             context: context
         )
 
-        self.camera = camera
+        self.singleCamera = camera
+        self.activeCamera = camera
         self.permission = permission
         self.previewRenderer = previewRenderer
         self.filterPipeline = pipeline
@@ -135,7 +138,7 @@ final class CameraViewModel: ObservableObject {
             stopRecordingTimer()
             isRecording = false
         }
-        camera.stop()
+        activeCamera.stop()
     }
 
     func retry() {
@@ -146,20 +149,28 @@ final class CameraViewModel: ObservableObject {
         let all = FlashMode.allCases
         let index = all.firstIndex(of: flashMode) ?? 0
         flashMode = all[(index + 1) % all.count]
-        camera.setFlashMode(flashMode)
+        activeCamera.setFlashMode(flashMode)
     }
 
     func togglePhotoResolution() {
+        guard !isDualCameraEnabled else {
+            showToast("双摄固定 12MP")
+            return
+        }
         photoResolution = photoResolution == .standard ? .high : .standard
-        camera.setPhotoResolution(photoResolution)
+        activeCamera.setPhotoResolution(photoResolution)
         showToast("拍照画质：\(photoResolution.displayName)")
         Haptics.selection()
     }
 
     func toggleLivePhoto() {
+        guard !isDualCameraEnabled else {
+            showToast("双摄模式下不支持实况照片")
+            return
+        }
         let wantOn = !isLivePhotoEnabled
         Task {
-            let enabled = await camera.setLivePhotoEnabled(wantOn)
+            let enabled = await activeCamera.setLivePhotoEnabled(wantOn)
             isLivePhotoEnabled = enabled
             if wantOn {
                 showToast(enabled ? "实况照片已开启" : "这台设备不支持实况照片")
@@ -175,9 +186,13 @@ final class CameraViewModel: ObservableObject {
             showToast("录制中不能切换摄像头")
             return
         }
+        guard !isDualCameraEnabled else {
+            showToast("双摄模式下前后摄像头已同时开启")
+            return
+        }
         Task {
             do {
-                try await camera.switchCamera()
+                try await activeCamera.switchCamera()
                 isFrontCamera.toggle()
                 isManualFocusEnabled = false
                 focusReticle = nil
@@ -192,6 +207,62 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
+    // MARK: - 前后双摄
+
+    func toggleDualCamera() {
+        guard DualCameraService.isSupported else {
+            showToast("这台设备不支持前后双摄")
+            return
+        }
+        guard !isRecording, !isCapturing, !isProcessingVideo else { return }
+        let turningOn = !isDualCameraEnabled
+
+        Task {
+            activeCamera.onFrame = nil
+            activeCamera.onStateChange = nil
+            activeCamera.stop()
+            if turningOn {
+                if isLivePhotoEnabled {
+                    _ = await activeCamera.setLivePhotoEnabled(false)
+                    isLivePhotoEnabled = false
+                }
+                photoResolution = .standard
+                isManualFocusEnabled = false
+                activeCamera = DualCameraService()
+                isDualCameraEnabled = true
+            } else {
+                activeCamera = singleCamera
+                isDualCameraEnabled = false
+            }
+
+            resetFrameState()
+            bindCamera()
+            do {
+                try await activeCamera.start()
+                if captureMode == .video {
+                    try? await activeCamera.setCaptureMode(.video)
+                }
+                showToast(turningOn ? "前后双摄已开启" : "已关闭前后双摄")
+            } catch {
+                showToast(error.localizedDescription)
+            }
+            Haptics.selection()
+        }
+    }
+
+    private func resetFrameState() {
+        settingsLock.lock()
+        didCaptureThumbnailSource = false
+        frameCount = 0
+        didReceiveFrame = false
+        frameSize = .zero
+        lastFrame = nil
+        settingsLock.unlock()
+        thumbnails.removeAll()
+        hasReceivedFrame = false
+        previewContentSize = .zero
+    }
+
     // MARK: - 照片 / 视频模式
 
     func selectCaptureMode(_ mode: CaptureMode) {
@@ -203,14 +274,14 @@ final class CameraViewModel: ObservableObject {
     private func applyCaptureMode(_ mode: CaptureMode) async {
         // 视频模式没有实况，先关掉再切，避免拍照格式被改回去。
         if mode == .video, isLivePhotoEnabled {
-            _ = await camera.setLivePhotoEnabled(false)
+            _ = await activeCamera.setLivePhotoEnabled(false)
             isLivePhotoEnabled = false
         }
         if mode == .video {
             await requestMicrophoneIfNeeded()
         }
         do {
-            try await camera.setCaptureMode(mode)
+            try await activeCamera.setCaptureMode(mode)
             captureMode = mode
             settingsLock.lock()
             didCaptureThumbnailSource = false
@@ -243,7 +314,7 @@ final class CameraViewModel: ObservableObject {
         Haptics.shutter()
         Task {
             do {
-                try await camera.startRecording()
+                try await activeCamera.startRecording()
             } catch {
                 isRecording = false
                 stopRecordingTimer()
@@ -268,20 +339,32 @@ final class CameraViewModel: ObservableObject {
                 isProcessingVideo = false
             }
             do {
-                let video = try await camera.stopRecording()
+                let video = try await activeCamera.stopRecording()
                 isRecording = false
                 showToast("正在保存视频…")
 
                 let pipeline = filterPipeline
-                let info = try await photoSaver.saveVideo(
-                    at: video.url,
-                    watermark: watermark
-                ) { image in
+                let transform: (CIImage) -> CIImage = { image in
                     pipeline.process(
                         image,
                         preset: settings.preset,
                         intensity: settings.intensity,
                         adjustments: settings.adjustments
+                    )
+                }
+                let info: SavedVideo
+                if let frontURL = video.frontURL {
+                    info = try await photoSaver.saveDualVideo(
+                        backURL: video.url,
+                        frontURL: frontURL,
+                        watermark: watermark,
+                        applying: transform
+                    )
+                } else {
+                    info = try await photoSaver.saveVideo(
+                        at: video.url,
+                        watermark: watermark,
+                        applying: transform
                     )
                 }
 
@@ -342,7 +425,7 @@ final class CameraViewModel: ObservableObject {
         guard let devicePoint = devicePoint(from: viewPoint, in: bounds) else { return }
         showReticle(at: viewPoint, locked: false)
         Haptics.selection()
-        Task { try? await camera.focus(at: devicePoint) }
+        Task { try? await activeCamera.focus(at: devicePoint) }
     }
 
     func toggleManualFocus() {
@@ -350,9 +433,9 @@ final class CameraViewModel: ObservableObject {
         focusReticle = nil
         if isManualFocusEnabled {
             let value = manualFocus
-            Task { try? await camera.setManualFocus(value) }
+            Task { try? await activeCamera.setManualFocus(value) }
         } else {
-            Task { try? await camera.resumeAutoFocus() }
+            Task { try? await activeCamera.resumeAutoFocus() }
         }
         Haptics.selection()
     }
@@ -361,7 +444,7 @@ final class CameraViewModel: ObservableObject {
         manualFocus = min(max(value, 0), 1)
         guard isManualFocusEnabled else { return }
         let target = manualFocus
-        Task { try? await camera.setManualFocus(target) }
+        Task { try? await activeCamera.setManualFocus(target) }
     }
 
     private func showReticle(at point: CGPoint, locked: Bool) {
@@ -432,7 +515,7 @@ final class CameraViewModel: ObservableObject {
         Task {
             defer { isCapturing = false }
             do {
-                let captured = try await camera.capturePhoto()
+                let captured = try await activeCamera.capturePhoto()
                 Haptics.shutter()
 
                 let settings = currentSettings()
@@ -504,7 +587,7 @@ final class CameraViewModel: ObservableObject {
     }
 
     private func bindCamera() {
-        camera.onFrame = { [weak self] image in
+        activeCamera.onFrame = { [weak self] image in
             guard let self else { return }
             // .photo 预设下视频帧是传感器全尺寸（约 4032×3024）。
             // 预览只需要够清楚的尺寸，先降采样再走滤镜，避免每帧处理千万像素。
@@ -535,7 +618,7 @@ final class CameraViewModel: ObservableObject {
             }
             self.captureThumbnailSource(from: previewSource)
         }
-        camera.onStateChange = { [weak self] runtime in
+        activeCamera.onStateChange = { [weak self] runtime in
             Task { @MainActor in
                 self?.apply(runtime)
             }
@@ -581,7 +664,7 @@ final class CameraViewModel: ObservableObject {
 
     private func runSession() async {
         do {
-            try await camera.start()
+            try await activeCamera.start()
             state = .running
         } catch let error as CameraError {
             switch error {

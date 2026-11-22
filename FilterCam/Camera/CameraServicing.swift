@@ -35,6 +35,8 @@ struct RecordedVideo {
     let duration: CMTime
     let pixelWidth: Int
     let pixelHeight: Int
+    /// 双摄模式下的前摄视频；普通录制为 nil。
+    var frontURL: URL? = nil
 }
 
 enum CameraRuntimeState: Equatable {
@@ -117,4 +119,11 @@ protocol CameraServicing: AnyObject {
     func setManualFocus(_ lensPosition: Float) async throws
     /// 恢复连续自动对焦。
     func resumeAutoFocus() async throws
+
+    /// 当前是否为前后双摄（同时开启）模式。
+    var isDualCamera: Bool { get }
+}
+
+extension CameraServicing {
+    var isDualCamera: Bool { false }
 }
