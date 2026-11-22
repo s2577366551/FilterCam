@@ -24,7 +24,6 @@ final class CameraViewModel: ObservableObject {
     @Published var isLibraryPresented = false
     @Published private(set) var toast: String?
     @Published private(set) var hasReceivedFrame = false
-    @Published private(set) var isSavingPhoto = false
     @Published private(set) var focusReticle: FocusReticle?
     @Published private(set) var isManualFocusEnabled = false
     @Published private(set) var manualFocus: Float = 0.5
@@ -33,6 +32,18 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var lastPhoto: UIImage?
     @Published private(set) var lastPhotoFileURL: URL?
     @Published var isPreviewPresented = false
+    @Published private(set) var isCapturing = false
+    @Published private(set) var pendingSaveCount = 0
+
+    /// 快门是否该显示忙碌：正在触发快门，或排队保存的照片太多。
+    var isShutterBusy: Bool {
+        isCapturing || pendingSaveCount >= maxPendingSaves
+    }
+
+    /// 最高画质单张占用内存大，排队数量要收窄。
+    private var maxPendingSaves: Int {
+        photoResolution == .high ? 1 : 2
+    }
     @Published private(set) var previewContentSize: CGSize = .zero
 
     let previewRenderer: PreviewRenderer?
@@ -53,6 +64,7 @@ final class CameraViewModel: ObservableObject {
     private var didReceiveFrame = false
     private var frameSize: CGSize = .zero
     private var reticleTask: Task<Void, Never>?
+    private var saveChain: Task<Void, Never>?
     private var adjustmentsByPreset: [String: FilterAdjustments] = [:]
     private var lastFrame: CIImage?
 
@@ -241,35 +253,73 @@ final class CameraViewModel: ObservableObject {
     }
 
     func capture() {
-        guard !isSavingPhoto else { return }
-        isSavingPhoto = true
+        guard !isCapturing, pendingSaveCount < maxPendingSaves else { return }
+        isCapturing = true
         Task {
-            defer { isSavingPhoto = false }
+            defer { isCapturing = false }
             do {
                 let captured = try await camera.capturePhoto()
                 Haptics.shutter()
 
                 let settings = currentSettings()
-                let pipeline = filterPipeline
-                let info = try await photoSaver.save(captured) { image in
-                    pipeline.process(
-                        image,
-                        preset: settings.preset,
-                        intensity: settings.intensity,
-                        adjustments: settings.adjustments
-                    )
-                }
+                // 立刻出缩略图，让用户马上看到拍到了什么。
                 lastPhoto = makePreviewImage(from: captured, settings: settings)
-                if let previous = lastPhotoFileURL {
-                    try? FileManager.default.removeItem(at: previous)
-                }
-                lastPhotoFileURL = info.fileURL
-                showToast(
-                    "已保存 \(info.pixelWidth)×\(info.pixelHeight)"
-                        + (info.isLivePhoto ? " 实况" : "")
-                )
+                enqueueSave(captured, settings: settings)
             } catch {
                 showToast(error.localizedDescription)
+            }
+        }
+    }
+
+    /// 保存排队执行：快门不必等编码和写相册完成，可以继续拍。
+    private func enqueueSave(
+        _ captured: CapturedPhoto,
+        settings: (preset: FilterPreset, intensity: Float, adjustments: FilterAdjustments)
+    ) {
+        pendingSaveCount += 1
+        let previous = saveChain
+        saveChain = Task { [weak self] in
+            await previous?.value
+            guard let self else { return }
+            await self.performSave(captured, settings: settings)
+            self.pendingSaveCount = max(0, self.pendingSaveCount - 1)
+        }
+    }
+
+    private func performSave(
+        _ captured: CapturedPhoto,
+        settings: (preset: FilterPreset, intensity: Float, adjustments: FilterAdjustments)
+    ) async {
+        do {
+            let pipeline = filterPipeline
+            let info = try await photoSaver.save(captured) { image in
+                pipeline.process(
+                    image,
+                    preset: settings.preset,
+                    intensity: settings.intensity,
+                    adjustments: settings.adjustments
+                )
+            }
+            if let previous = lastPhotoFileURL {
+                try? FileManager.default.removeItem(at: previous)
+            }
+            lastPhotoFileURL = info.fileURL
+            showToast(
+                "已保存 \(info.pixelWidth)×\(info.pixelHeight)"
+                    + (info.isLivePhoto ? " 实况" : "")
+            )
+        } catch {
+            showToast(error.localizedDescription)
+        }
+    }
+
+    /// LUT 输入类型改变后，重新生成对应滤镜的缩略图。
+    func refreshThumbnail(for presetID: String) {
+        guard let frame = lastFrame,
+              let preset = resolvePreset(id: presetID) else { return }
+        thumbnailService.generate(from: frame, presets: [preset]) { [weak self] images in
+            Task { @MainActor in
+                self?.thumbnails.merge(images) { _, new in new }
             }
         }
     }

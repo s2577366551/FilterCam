@@ -66,7 +66,7 @@ struct CameraScreen: View {
                 HStack(alignment: .center) {
                     lastPhotoButton
                     Spacer()
-                    ShutterButton(isBusy: viewModel.isSavingPhoto) { viewModel.capture() }
+                    ShutterButton(isBusy: viewModel.isShutterBusy) { viewModel.capture() }
                     Spacer()
                     Color.clear
                         .frame(width: 50, height: 50)
@@ -110,7 +110,8 @@ struct CameraScreen: View {
                 userLUTs: viewModel.userLUTLibrary,
                 thumbnails: viewModel.thumbnails,
                 selectedID: viewModel.selectedPreset.id,
-                onSelect: { viewModel.selectPreset($0) }
+                onSelect: { viewModel.selectPreset($0) },
+                onLUTChanged: { viewModel.refreshThumbnail(for: $0) }
             )
         }
         .fullScreenCover(isPresented: $viewModel.isPreviewPresented) {

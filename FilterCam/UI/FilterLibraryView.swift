@@ -8,6 +8,7 @@ struct FilterLibraryView: View {
     let thumbnails: [String: UIImage]
     let selectedID: String
     let onSelect: (FilterPreset) -> Void
+    var onLUTChanged: (String) -> Void = { _ in }
 
     @Environment(\.dismiss) private var dismiss
     @State private var category: FilterCategory = .simulation
@@ -195,7 +196,7 @@ struct FilterLibraryView: View {
                 .frame(height: 92)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
 
-                Text(preset.displayName)
+                Text(preset.stripName)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(selectedID == preset.id ? Theme.control : Theme.controlDim)
                     .lineLimit(1)
@@ -218,6 +219,16 @@ struct FilterLibraryView: View {
                     renamingLUT = lut
                 } label: {
                     Label("重命名", systemImage: "pencil")
+                }
+                Button {
+                    userLUTs.setInputType(lut.id, isFLog2: !lut.isFLog2)
+                    onLUTChanged(lut.id)
+                    Haptics.selection()
+                } label: {
+                    Label(
+                        lut.isFLog2 ? "输入类型改为普通照片" : "输入类型改为 F-Log2",
+                        systemImage: "arrow.triangle.2.circlepath"
+                    )
                 }
                 Button(role: .destructive) {
                     userLUTs.delete(lut.id)

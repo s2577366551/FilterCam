@@ -6,7 +6,7 @@ struct UserLUT: Codable, Identifiable, Equatable {
     var displayName: String
     let fileName: String
     let dimension: Int
-    let isFLog2: Bool
+    var isFLog2: Bool
     let importedAt: Date
 }
 
@@ -128,8 +128,20 @@ final class UserLUTLibrary: ObservableObject {
         publish()
     }
 
-    func rename(_ id: String, to name: String) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// 切换 LUT 的输入类型，并清掉已缓存的转换结果。
+    func setInputType(_ id: String, isFLog2: Bool) {
+        lock.lock()
+        if let index = entries.firstIndex(where: { $0.id == id }) {
+            entries[index].isFLog2 = isFLog2
+            dataCache[id] = nil
+            saveIndexLocked()
+        }
+        lock.unlock()
+
+        publish()
+    }
+
+    func rename(_ id: String, to name: String) {        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
         lock.lock()
