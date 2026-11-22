@@ -53,6 +53,7 @@ final class DualCameraService: NSObject, CameraServicing {
     private var assetWriter: AVAssetWriter?
     private var writerVideoInput: AVAssetWriterInput?
     private var writerAudioInput: AVAssetWriterInput?
+    private var writerAdaptor: AVAssetWriterInputPixelBufferAdaptor?
     private var writerURL: URL?
     private var writerSize = CGSize(width: 1080, height: 1920)
     private var writerStarted = false
@@ -479,6 +480,14 @@ final class DualCameraService: NSObject, CameraServicing {
             throw CameraError.captureFailed("无法创建视频写入")
         }
         writer.add(videoWriter)
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: videoWriter,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+                kCVPixelBufferWidthKey as String: Int(writerSize.width),
+                kCVPixelBufferHeightKey as String: Int(writerSize.height)
+            ]
+        )
 
         var audioWriter: AVAssetWriterInput?
         if audioInput != nil {
@@ -503,6 +512,7 @@ final class DualCameraService: NSObject, CameraServicing {
         assetWriter = writer
         writerVideoInput = videoWriter
         writerAudioInput = audioWriter
+        writerAdaptor = adaptor
         writerURL = url
         writerStarted = false
         writerActive = true
@@ -515,7 +525,8 @@ final class DualCameraService: NSObject, CameraServicing {
               let writer = assetWriter,
               writer.status == .writing,
               let input = writerVideoInput,
-              input.isReadyForMoreMediaData else { return }
+              input.isReadyForMoreMediaData,
+              let adaptor = writerAdaptor else { return }
 
         if !writerStarted {
             writer.startSession(atSourceTime: pts)
@@ -524,7 +535,7 @@ final class DualCameraService: NSObject, CameraServicing {
         }
         writerLastPTS = pts
 
-        guard let pool = input.pixelBufferPool else { return }
+        guard let pool = adaptor.pixelBufferPool else { return }
         var buffer: CVPixelBuffer?
         _ = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &buffer)
         guard let destination = buffer else { return }
@@ -539,7 +550,7 @@ final class DualCameraService: NSObject, CameraServicing {
             bounds: CGRect(origin: .zero, size: writerSize),
             colorSpace: CGColorSpaceCreateDeviceRGB()
         )
-        input.append(destination, withPresentationTime: pts)
+        adaptor.append(destination, withPresentationTime: pts)
     }
 
     private func appendAudio(_ sampleBuffer: CMSampleBuffer) {
@@ -570,6 +581,7 @@ final class DualCameraService: NSObject, CameraServicing {
         assetWriter = nil
         writerVideoInput = nil
         writerAudioInput = nil
+        writerAdaptor = nil
         writerURL = nil
         writerStarted = false
         writerActive = false
