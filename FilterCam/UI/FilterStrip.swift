@@ -8,8 +8,8 @@ struct FilterStrip: View {
     let onSelect: (FilterPreset) -> Void
     let onOpenLibrary: () -> Void
 
-    private let itemSize: CGFloat = 50
-    private let labelWidth: CGFloat = 58
+    private let itemSize: CGFloat = 48
+    private let labelWidth: CGFloat = 56
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -32,6 +32,7 @@ struct FilterStrip: View {
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                                     .frame(width: labelWidth)
+                                    .shadow(color: .black.opacity(0.55), radius: 2, y: 1)
                             }
                             .opacity(selectedID == preset.id ? 1 : 0.78)
                         }

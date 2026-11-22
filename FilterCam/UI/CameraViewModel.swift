@@ -112,7 +112,10 @@ final class CameraViewModel: ObservableObject {
     }
 
     var stripPresets: [FilterPreset] {
-        var presets = filterStore.stripIDs.compactMap { resolvePreset(id: $0) }
+        var seen = Set<String>()
+        var presets = filterStore.stripIDs
+            .compactMap { resolvePreset(id: $0) }
+            .filter { seen.insert($0.id).inserted }
         if !presets.contains(selectedPreset) {
             presets = [selectedPreset] + presets.prefix(FilterStore.stripLimit)
         }

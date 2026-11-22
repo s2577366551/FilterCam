@@ -22,6 +22,18 @@ struct CameraScreen: View {
                     .ignoresSafeArea()
             }
 
+            // 底部压一层渐变，保证白色标签在明亮画面上也看得清。
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0.62),
+                    .init(color: .black.opacity(0.50), location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
             focusLayer
 
             VStack(spacing: 0) {
@@ -67,8 +79,14 @@ struct CameraScreen: View {
                     .padding(.bottom, 8)
                 }
 
-                modePicker
-                    .padding(.bottom, 6)
+                FilterStrip(
+                    presets: viewModel.stripPresets,
+                    thumbnails: viewModel.thumbnails,
+                    selectedID: viewModel.selectedPreset.id,
+                    onSelect: { viewModel.selectPreset($0) },
+                    onOpenLibrary: { viewModel.isLibraryPresented = true }
+                )
+                .padding(.bottom, 4)
 
                 HStack(alignment: .center) {
                     lastPhotoButton
@@ -89,16 +107,10 @@ struct CameraScreen: View {
                         .frame(width: 50, height: 50)
                 }
                 .padding(.horizontal, 24)
-                .padding(.bottom, 12)
 
-                FilterStrip(
-                    presets: viewModel.stripPresets,
-                    thumbnails: viewModel.thumbnails,
-                    selectedID: viewModel.selectedPreset.id,
-                    onSelect: { viewModel.selectPreset($0) },
-                    onOpenLibrary: { viewModel.isLibraryPresented = true }
-                )
-                .padding(.bottom, 8)
+                modePicker
+                    .padding(.top, 4)
+                    .padding(.bottom, 6)
             }
 
             overlay

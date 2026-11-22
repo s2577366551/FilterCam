@@ -56,19 +56,32 @@ struct FilterPreset: Identifiable, Equatable, Hashable {
     /// 滤镜条上显示的短名字：去掉富士官方文件名的前后缀，避免把布局撑开。
     var stripName: String {
         var name = displayName
-        for prefix in ["FLog2_to_", "FLog2-to-", "FLog2_to", "FLog2 "] where name.hasPrefix(prefix) {
-            name.removeFirst(prefix.count)
-            break
+
+        // 前缀大小写都可能不同（FLog2 / Flog2 / flog2）。
+        let lower = name.lowercased()
+        for prefix in ["flog2_to_", "flog2-to-", "flog2_to", "flog2_", "flog2-", "flog2 "] {
+            if lower.hasPrefix(prefix) {
+                name = String(name.dropFirst(prefix.count))
+                break
+            }
         }
-        for marker in ["_33grid", "_33Grid", "_V.1", "_v1", ".cube"] {
-            if let range = name.range(of: marker) {
+
+        // 去掉常见的版本/网格后缀。
+        for marker in ["_33grid", "-33grid", "_33", "-33", "_v1.00", "_v1.0", "_v1", "-v1", ".cube"] {
+            if let range = name.range(of: marker, options: .caseInsensitive) {
                 name = String(name[..<range.lowerBound])
             }
         }
+
         name = name
             .replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "-", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 还是太长就截断，保证 56pt 宽度里能显示完整的意思。
+        if name.count > 12 {
+            name = String(name.prefix(12))
+        }
         return name.isEmpty ? displayName : name
     }
 
