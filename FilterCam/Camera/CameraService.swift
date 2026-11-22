@@ -14,6 +14,10 @@ final class CameraService: NSObject, CameraServicing {
     private var position: AVCaptureDevice.Position = .back
     private var flashMode: FlashMode = .auto
     private var photoResolution: PhotoResolution = .standard
+    private var livePhotoEnabled = false
+    private var awaitingLivePhotoMovie = false
+    private var pendingCapturedPhoto: CapturedPhoto?
+    private var pendingMovieURL: URL?
     private var isConfigured = false
     private var isObserving = false
     private let photoLock = NSLock()
@@ -70,6 +74,18 @@ final class CameraService: NSObject, CameraServicing {
         sessionQueue.async { self.photoResolution = resolution }
     }
 
+    var isLivePhotoCaptureSupported: Bool {
+        photoOutput.isLivePhotoCaptureSupported
+    }
+
+    func setLivePhotoEnabled(_ enabled: Bool) {
+        sessionQueue.async {
+            let supported = self.photoOutput.isLivePhotoCaptureSupported
+            self.livePhotoEnabled = enabled && supported
+            self.photoOutput.isLivePhotoCaptureEnabled = self.livePhotoEnabled
+        }
+    }
+
     func capturePhoto() async throws -> CapturedPhoto {
         try await withCheckedThrowingContinuation { continuation in
             sessionQueue.async {
@@ -89,6 +105,16 @@ final class CameraService: NSObject, CameraServicing {
                 }
 
                 let settings = self.makePhotoSettings()
+                self.awaitingLivePhotoMovie = self.livePhotoEnabled
+                    && self.photoOutput.isLivePhotoCaptureSupported
+                self.pendingCapturedPhoto = nil
+                self.pendingMovieURL = nil
+                if self.awaitingLivePhotoMovie {
+                    let url = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("filtercam-live-\(UUID().uuidString).mov")
+                    self.pendingMovieURL = url
+                    settings.livePhotoMovieFileURL = url
+                }
                 self.photoOutput.capturePhoto(with: settings, delegate: self)
             }
         }
@@ -103,7 +129,9 @@ final class CameraService: NSObject, CameraServicing {
             settings = AVCapturePhotoSettings()
         }
 
-        settings.maxPhotoDimensions = photoDimensions(for: photoResolution)
+        // 实况照片不支持最高像素档，自动按标准档拍。
+        let effectiveResolution: PhotoResolution = livePhotoEnabled ? .standard : photoResolution
+        settings.maxPhotoDimensions = photoDimensions(for: effectiveResolution)
         settings.photoQualityPrioritization = .quality
         if photoOutput.supportedFlashModes.contains(flashMode.avMode) {
             settings.flashMode = flashMode.avMode
@@ -444,30 +472,105 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
         didFinishProcessingPhoto photo: AVCapturePhoto,
         error: Error?
     ) {
-        let continuation: CheckedContinuation<CapturedPhoto, Error>?
-        photoLock.lock()
-        continuation = photoContinuation
-        photoContinuation = nil
-        photoLock.unlock()
-
         if let error {
-            continuation?.resume(throwing: CameraError.captureFailed(error.localizedDescription))
+            finishCapture(throwing: CameraError.captureFailed(error.localizedDescription))
             return
         }
         guard let image = Self.makeImage(from: photo) else {
-            continuation?.resume(throwing: CameraError.captureFailed("照片数据为空"))
+            finishCapture(throwing: CameraError.captureFailed("照片数据为空"))
             return
         }
         let rawOrientation = (photo.metadata[kCGImagePropertyOrientation as String] as? NSNumber)?.uint32Value
         // App 只支持竖屏，缺失时按「竖拍」处理。
         let orientation = rawOrientation.flatMap(CGImagePropertyOrientation.init(rawValue:)) ?? .right
-        continuation?.resume(
-            returning: CapturedPhoto(
-                image: image,
-                orientation: orientation,
-                metadata: photo.metadata
-            )
+        let captured = CapturedPhoto(
+            image: image,
+            orientation: orientation,
+            metadata: photo.metadata,
+            livePhotoMovieURL: nil
         )
+
+        photoLock.lock()
+        let isLive = awaitingLivePhotoMovie
+        if isLive {
+            pendingCapturedPhoto = captured
+        }
+        let continuation = photoContinuation
+        if !isLive {
+            photoContinuation = nil
+        }
+        photoLock.unlock()
+
+        guard isLive else {
+            continuation?.resume(returning: captured)
+            return
+        }
+        // 实况照片等 didFinishCaptureFor，确认视频文件写完再返回。
+    }
+
+    func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
+        error: Error?
+    ) {
+        photoLock.lock()
+        let wasLive = awaitingLivePhotoMovie
+        let photo = pendingCapturedPhoto
+        let movieURL = pendingMovieURL
+        let continuation = photoContinuation
+        if wasLive {
+            clearLiveState()
+            photoContinuation = nil
+        }
+        photoLock.unlock()
+
+        guard wasLive, let continuation else { return }
+
+        if let error {
+            if let photo {
+                if let movieURL { try? FileManager.default.removeItem(at: movieURL) }
+                continuation.resume(returning: photo)
+            } else {
+                continuation.resume(
+                    throwing: CameraError.captureFailed(error.localizedDescription)
+                )
+            }
+            return
+        }
+        guard let photo else {
+            continuation.resume(throwing: CameraError.captureFailed("照片数据为空"))
+            return
+        }
+        if let movieURL, FileManager.default.fileExists(atPath: movieURL.path) {
+            continuation.resume(
+                returning: CapturedPhoto(
+                    image: photo.image,
+                    orientation: photo.orientation,
+                    metadata: photo.metadata,
+                    livePhotoMovieURL: movieURL
+                )
+            )
+        } else {
+            // 视频没写出来就退回普通照片，避免整张照片丢失。
+            if let movieURL { try? FileManager.default.removeItem(at: movieURL) }
+            continuation.resume(returning: photo)
+        }
+    }
+
+    /// 调用方必须已持有 photoLock。
+    private func clearLiveState() {
+        pendingCapturedPhoto = nil
+        pendingMovieURL = nil
+        awaitingLivePhotoMovie = false
+    }
+
+    private func finishCapture(throwing error: Error) {
+        photoLock.lock()
+        let continuation = photoContinuation
+        photoContinuation = nil
+        clearLiveState()
+        photoLock.unlock()
+        continuation?.resume(throwing: error)
     }
 
     /// 优先用解码后的像素缓冲，避免多一次 JPEG/HEIF 解码带来的画质损失。

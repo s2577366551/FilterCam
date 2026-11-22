@@ -29,6 +29,7 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var isManualFocusEnabled = false
     @Published private(set) var manualFocus: Float = 0.5
     @Published private(set) var photoResolution: PhotoResolution = .standard
+    @Published private(set) var isLivePhotoEnabled = false
     @Published private(set) var previewContentSize: CGSize = .zero
 
     let previewRenderer: PreviewRenderer?
@@ -112,6 +113,17 @@ final class CameraViewModel: ObservableObject {
         photoResolution = photoResolution == .standard ? .high : .standard
         camera.setPhotoResolution(photoResolution)
         showToast("拍照画质：\(photoResolution.displayName)")
+        Haptics.selection()
+    }
+
+    func toggleLivePhoto() {
+        guard camera.isLivePhotoCaptureSupported else {
+            showToast("这台设备不支持实况照片")
+            return
+        }
+        isLivePhotoEnabled.toggle()
+        camera.setLivePhotoEnabled(isLivePhotoEnabled)
+        showToast(isLivePhotoEnabled ? "实况照片已开启" : "实况照片已关闭")
         Haptics.selection()
     }
 
@@ -242,7 +254,10 @@ final class CameraViewModel: ObservableObject {
                         adjustments: settings.adjustments
                     )
                 }
-                showToast("已保存 \(info.pixelWidth)×\(info.pixelHeight)")
+                showToast(
+                    "已保存 \(info.pixelWidth)×\(info.pixelHeight)"
+                        + (info.isLivePhoto ? " 实况" : "")
+                )
             } catch {
                 showToast(error.localizedDescription)
             }

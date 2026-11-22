@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreImage
 import ImageIO
 import Photos
@@ -7,6 +8,7 @@ struct SavedPhoto {
     let pixelWidth: Int
     let pixelHeight: Int
     let byteCount: Int
+    let isLivePhoto: Bool
 }
 
 enum PhotoSaveError: LocalizedError {
@@ -26,8 +28,8 @@ enum PhotoSaveError: LocalizedError {
     }
 }
 
-/// 把全分辨率照片套上滤镜后，以最高质量（HEIC，质量 1.0）写入相册。
-/// 整个过程在后台队列执行，不阻塞预览。
+/// 把照片套上滤镜后以最高质量写入相册。
+/// 实况照片会把伴生视频也过一遍同样的滤镜，再和静帧配对保存。
 final class PhotoLibrarySaver {
     private let queue = DispatchQueue(label: "com.filtercam.photo.save", qos: .userInitiated)
     private let context: CIContext
@@ -47,42 +49,150 @@ final class PhotoLibrarySaver {
             queue.async {
                 autoreleasepool {
                     do {
-                        let result = try self.encode(captured, transform: transform)
-                        continuation.resume(returning: result)
+                        continuation.resume(returning: try self.encodeStill(captured, transform: transform))
                     } catch {
                         continuation.resume(throwing: error)
                     }
                 }
             }
         }
+        let (photoData, size) = encoded
 
-        let (data, size) = encoded
-        let identifier = UTType.heic.identifier
-        try await PHPhotoLibrary.shared().performChanges {
-            let request = PHAssetCreationRequest.forAsset()
-            let options = PHAssetResourceCreationOptions()
-            options.uniformTypeIdentifier = identifier
-            request.addResource(with: .photo, data: data, options: options)
-            request.creationDate = Date()
+        if let movieURL = captured.livePhotoMovieURL {
+            return try await saveLivePhoto(
+                photoData: photoData,
+                size: size,
+                movieURL: movieURL,
+                captured: captured,
+                transform: transform
+            )
+        }
+
+        try await writeToLibrary { request in
+            request.addResource(with: .photo, data: photoData, options: Self.photoOptions())
+        }
+        return SavedPhoto(
+            pixelWidth: Int(size.width),
+            pixelHeight: Int(size.height),
+            byteCount: photoData.count,
+            isLivePhoto: false
+        )
+    }
+
+    // MARK: - 实况照片
+
+    private func saveLivePhoto(
+        photoData: Data,
+        size: CGSize,
+        movieURL: URL,
+        captured: CapturedPhoto,
+        transform: @escaping (CIImage) -> CIImage
+    ) async throws -> SavedPhoto {
+        let filteredMovie = try await filterMovie(
+            at: movieURL,
+            identifier: Self.livePhotoIdentifier(from: captured.metadata),
+            transform: transform
+        )
+        defer {
+            try? FileManager.default.removeItem(at: movieURL)
+            try? FileManager.default.removeItem(at: filteredMovie)
+        }
+
+        try await writeToLibrary { request in
+            request.addResource(with: .photo, data: photoData, options: Self.photoOptions())
+            let videoOptions = PHAssetResourceCreationOptions()
+            videoOptions.uniformTypeIdentifier = UTType.quickTimeMovie.identifier
+            request.addResource(with: .pairedVideo, fileURL: filteredMovie, options: videoOptions)
         }
 
         return SavedPhoto(
             pixelWidth: Int(size.width),
             pixelHeight: Int(size.height),
-            byteCount: data.count
+            byteCount: photoData.count,
+            isLivePhoto: true
         )
+    }
+
+    /// 用 Core Image 逐帧套滤镜并重新导出视频，同时保留实况照片的配对标识。
+    private func filterMovie(
+        at url: URL,
+        identifier: String?,
+        transform: @escaping (CIImage) -> CIImage
+    ) async throws -> URL {
+        let asset = AVURLAsset(url: url)
+        let composition = AVVideoComposition(asset: asset) { request in
+            let source = request.sourceImage
+            let output = transform(source).cropped(to: source.extent)
+            request.finish(with: output, context: self.context)
+        }
+
+        guard let export = AVAssetExportSession(
+            asset: asset,
+            presetName: AVAssetExportPresetHighestQuality
+        ) else {
+            throw PhotoSaveError.saveFailed("无法创建视频导出会话")
+        }
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("filtercam-live-filtered-\(UUID().uuidString).mov")
+        export.outputURL = outputURL
+        export.outputFileType = .mov
+        export.videoComposition = composition
+        export.metadata = Self.mergedMetadata(for: asset, identifier: identifier)
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            export.exportAsynchronously { continuation.resume() }
+        }
+
+        guard export.status == .completed else {
+            throw PhotoSaveError.saveFailed(export.error?.localizedDescription ?? "视频处理失败")
+        }
+        return outputURL
+    }
+
+    /// 保留原有元数据，并补上实况照片的内容标识，保证和静帧配对成功。
+    private static func mergedMetadata(
+        for asset: AVAsset,
+        identifier: String?
+    ) -> [AVMetadataItem] {
+        var items = asset.metadata + asset.metadata(forFormat: .quickTimeMetadata)
+        let contentKey = "com.apple.quicktime.content.identifier"
+
+        var seen = Set<String>()
+        items = items.filter { item in
+            let key = (item.key as? String) ?? ""
+            let signature = "\(item.keySpace?.rawValue ?? "")|\(key)|\(item.commonKey?.rawValue ?? "")"
+            return seen.insert(signature).inserted
+        }
+
+        let alreadyHasIdentifier = items.contains { item in
+            (item.key as? String) == contentKey
+        }
+        if let identifier, !alreadyHasIdentifier {
+            let item = AVMutableMetadataItem()
+            item.keySpace = .quickTimeMetadata
+            item.key = contentKey as NSString
+            item.value = identifier as NSString
+            items.append(item)
+        }
+        return items
+    }
+
+    private static func livePhotoIdentifier(from metadata: [String: Any]) -> String? {
+        guard let maker = metadata[kCGImagePropertyMakerAppleDictionary as String] as? [String: Any] else {
+            return nil
+        }
+        return maker["17"] as? String
     }
 
     // MARK: - 编码
 
-    private func encode(
+    private func encodeStill(
         _ captured: CapturedPhoto,
         transform: (CIImage) -> CIImage
     ) throws -> (Data, CGSize) {
         let oriented = captured.image.oriented(captured.orientation)
         var output = transform(oriented)
 
-        // 保证从 (0,0) 开始，避免 HEIF 写出时被裁掉。
         let extent = output.extent.integral
         if extent.origin != .zero {
             output = output.transformed(
@@ -90,40 +200,49 @@ final class PhotoLibrarySaver {
             )
         }
         let size = output.extent.size
-
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
-        var options: [CIImageRepresentationOption: Any] = [
-            CIImageRepresentationOption(
-                rawValue: kCGImageDestinationLossyCompressionQuality as String
-            ): 1.0
-        ]
 
+        guard let cgImage = context.createCGImage(
+            output,
+            from: output.extent,
+            format: .RGBA8,
+            colorSpace: colorSpace
+        ) else {
+            throw PhotoSaveError.encodingFailed
+        }
+
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data as CFMutableData,
+            UTType.heic.identifier as CFString,
+            1,
+            nil
+        ) else {
+            throw PhotoSaveError.encodingFailed
+        }
+
+        var properties: [CFString: Any] = [
+            kCGImageDestinationLossyCompressionQuality: 1.0,
+            kCGImagePropertyOrientation: 1
+        ]
         let exif = Self.sanitizedExif(captured.metadata)
         if !exif.isEmpty {
-            options[CIImageRepresentationOption(rawValue: kCGImagePropertyExifDictionary as String)] = exif
+            properties[kCGImagePropertyExifDictionary] = exif
         }
         var tiff = (captured.metadata[kCGImagePropertyTIFFDictionary as String] as? [String: Any]) ?? [:]
         tiff[kCGImagePropertyTIFFOrientation as String] = 1
-        options[CIImageRepresentationOption(rawValue: kCGImagePropertyTIFFDictionary as String)] = tiff
-        options[CIImageRepresentationOption(rawValue: kCGImagePropertyOrientation as String)] = 1
+        properties[kCGImagePropertyTIFFDictionary] = tiff
 
-        if let data = context.heifRepresentation(
-            of: output,
-            format: .RGBA8,
-            colorSpace: colorSpace,
-            options: options
-        ) {
-            return (data, size)
+        // 实况照片的静帧必须带上原始 MakerApple 信息（含配对标识）。
+        if let maker = captured.metadata[kCGImagePropertyMakerAppleDictionary as String] {
+            properties[kCGImagePropertyMakerAppleDictionary] = maker
         }
-        // HEIF 不可用时退回 JPEG，仍然按最高质量写。
-        if let data = context.jpegRepresentation(
-            of: output,
-            colorSpace: colorSpace,
-            options: options
-        ) {
-            return (data, size)
+
+        CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else {
+            throw PhotoSaveError.encodingFailed
         }
-        throw PhotoSaveError.encodingFailed
+        return (data as Data, size)
     }
 
     /// 去掉与原图尺寸冲突的 EXIF 字段，避免相册显示错误尺寸。
@@ -135,6 +254,24 @@ final class PhotoLibrarySaver {
         clean.removeValue(forKey: kCGImagePropertyExifPixelXDimension as String)
         clean.removeValue(forKey: kCGImagePropertyExifPixelYDimension as String)
         return clean
+    }
+
+    // MARK: - 相册
+
+    private func writeToLibrary(
+        _ build: @escaping (PHAssetCreationRequest) -> Void
+    ) async throws {
+        try await PHPhotoLibrary.shared().performChanges {
+            let request = PHAssetCreationRequest.forAsset()
+            request.creationDate = Date()
+            build(request)
+        }
+    }
+
+    private static func photoOptions() -> PHAssetResourceCreationOptions {
+        let options = PHAssetResourceCreationOptions()
+        options.uniformTypeIdentifier = UTType.heic.identifier
+        return options
     }
 
     // MARK: - 权限

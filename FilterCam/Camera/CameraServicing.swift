@@ -7,6 +7,8 @@ struct CapturedPhoto {
     let image: CIImage
     let orientation: CGImagePropertyOrientation
     let metadata: [String: Any]
+    /// 实况照片的伴生视频（未滤镜），普通拍照为 nil。
+    let livePhotoMovieURL: URL?
 
     var pixelWidth: Int { Int(image.extent.width) }
     var pixelHeight: Int { Int(image.extent.height) }
@@ -74,6 +76,8 @@ protocol CameraServicing: AnyObject {
     func switchCamera() async throws
     func setFlashMode(_ mode: FlashMode)
     func setPhotoResolution(_ resolution: PhotoResolution)
+    var isLivePhotoCaptureSupported: Bool { get }
+    func setLivePhotoEnabled(_ enabled: Bool)
     func capturePhoto() async throws -> CapturedPhoto
 
     /// 在指定设备坐标点自动对焦并自动曝光（坐标范围 0...1）。

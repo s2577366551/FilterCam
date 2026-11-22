@@ -4,9 +4,11 @@ struct TopBar: View {
     let flashMode: FlashMode
     let isManualFocus: Bool
     let resolutionBadge: String
+    let isLivePhoto: Bool
     let onFlash: () -> Void
     let onManualFocus: () -> Void
     let onResolution: () -> Void
+    let onLivePhoto: () -> Void
     let onFlip: () -> Void
 
     var body: some View {
@@ -43,6 +45,15 @@ struct TopBar: View {
                     .background(Theme.overlay, in: Capsule())
             }
             .accessibilityLabel("拍照分辨率")
+
+            Button(action: onLivePhoto) {
+                Image(systemName: "livephoto")
+                    .font(.system(size: 17))
+                    .foregroundStyle(isLivePhoto ? Color.yellow : Theme.controlDim)
+                    .frame(width: Theme.hitTarget, height: Theme.hitTarget)
+                    .background(Theme.overlay, in: Circle())
+            }
+            .accessibilityLabel("实况照片")
 
             Spacer()
 
