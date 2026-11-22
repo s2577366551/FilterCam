@@ -488,7 +488,48 @@ final class CameraViewModel: ObservableObject {
 
     var zoomRange: ClosedRange<CGFloat> {
         let range = activeCamera.zoomRange
-        return min(range.lowerBound, 1)...max(range.upperBound, 1)
+        let low = max(range.lowerBound, 0.5)
+        return low...max(range.upperBound, low)
+    }
+
+    /// 苹果相机那种档位：0.5 / 1 / 2 / 3 / 最大，按设备实际能力裁剪。
+    var zoomStops: [ZoomStop] {
+        let range = zoomRange
+        let hasUltraWide = range.lowerBound <= 0.55
+        var stops: [ZoomStop] = []
+
+        if hasUltraWide {
+            stops.append(ZoomStop(value: 0.5, label: "0.5", millimeters: "13 MM"))
+        }
+        for value in [1.0, 2.0, 3.0] as [CGFloat] where range.contains(value) {
+            let mm: String?
+            switch value {
+            case 1: mm = hasUltraWide ? "24 MM" : nil
+            case 2: mm = hasUltraWide ? "48 MM" : nil
+            default: mm = nil
+            }
+            stops.append(ZoomStop(
+                value: value,
+                label: value == 1 ? "1" : String(format: "%.0f", value),
+                millimeters: mm
+            ))
+        }
+
+        let maxValue = min(range.upperBound, 15)
+        if maxValue > 3.5 {
+            stops.append(ZoomStop(
+                value: maxValue,
+                label: String(format: "%.0f", maxValue),
+                millimeters: nil
+            ))
+        }
+        return stops
+    }
+
+    /// 底部胶囊只放常用档位，最远倍数留给变焦盘。
+    var zoomPillStops: [ZoomStop] {
+        let optical = zoomStops.filter { $0.value <= 3.5 }
+        return optical.isEmpty ? Array(zoomStops.prefix(1)) : optical
     }
 
     func setZoom(_ factor: CGFloat) {

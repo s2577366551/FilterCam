@@ -1,55 +1,63 @@
 import SwiftUI
 
-/// 苹果相机那种弧形变焦盘：沿弧线拖动改变倍数。
+/// 变焦档位（0.5 / 1 / 2 / 3 / 最远）。
+struct ZoomStop: Identifiable, Equatable {
+    let value: CGFloat
+    let label: String
+    let millimeters: String?
+    var id: CGFloat { value }
+}
+
+/// 苹果相机那种弧形变焦盘：深色面板，上沿是刻度弧，档位标在弧内。
 struct ZoomDial: View {
     let value: CGFloat
     let range: ClosedRange<CGFloat>
-    let stops: [CGFloat]
+    let stops: [ZoomStop]
     let onChange: (CGFloat) -> Void
     let onInteractionEnded: () -> Void
 
-    private let startDegrees: Double = 232
-    private let sweepDegrees: Double = 76
+    private let startDegrees: Double = 222
+    private let sweepDegrees: Double = 96
+    private let apex: CGFloat = 40
 
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
-            let radius = size.width * 0.66
-            let center = CGPoint(x: size.width / 2, y: 40 + radius)
+            let radius = size.width * 0.62
+            let center = CGPoint(x: size.width / 2, y: apex + radius)
             let dialRange = effectiveRange
-            let angle = startDegrees + sweepDegrees * fraction(for: value, in: dialRange)
+            let currentT = fraction(for: value, in: dialRange)
+            let currentAngle = startDegrees + sweepDegrees * currentT
+            let nearest = stops.min { abs($0.value - value) < abs($1.value - value) }
+            let isAtStop = nearest.map { abs($0.value - value) < 0.05 } ?? false
 
-            ZStack {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color.black.opacity(0.62))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
-                    )
-
+            ZStack(alignment: .topLeading) {
+                panel(center: center, radius: radius, size: size)
                 arc(center: center, radius: radius)
-                    .stroke(
-                        Color.white.opacity(0.30),
-                        style: StrokeStyle(lineWidth: 2, lineCap: .round)
-                    )
+                ticks(center: center, radius: radius)
 
-                ForEach(0...20, id: \.self) { index in
-                    tick(index: index, center: center, radius: radius)
+                ForEach(stops) { stop in
+                    if !(stop.value == nearest?.value && !isAtStop) {
+                        stopLabel(
+                            stop: stop,
+                            isActive: isAtStop && stop.value == nearest?.value,
+                            center: center,
+                            radius: radius
+                        )
+                    }
                 }
 
-                Text(displayText)
-                    .font(.system(size: 26, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(isDefault ? Theme.control : Color.yellow)
-                    .shadow(color: .black.opacity(0.55), radius: 3, y: 1)
-                    .position(x: size.width / 2, y: 82)
-                    .allowsHitTesting(false)
+                if !isAtStop {
+                    Text(formatted(value))
+                        .font(.system(size: 18, weight: .bold).monospacedDigit())
+                        .foregroundStyle(Color.yellow)
+                        .position(point(center: center, radius: radius - 38, degrees: currentAngle))
+                }
 
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: 10, height: 10)
-                    .shadow(color: .black.opacity(0.45), radius: 2)
-                    .position(point(center: center, radius: radius, degrees: angle))
-                    .allowsHitTesting(false)
+                Image(systemName: "arrowtriangle.up.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.yellow)
+                    .position(point(center: center, radius: radius + 1, degrees: currentAngle))
             }
             .contentShape(Rectangle())
             .gesture(
@@ -67,7 +75,30 @@ struct ZoomDial: View {
 
     // MARK: - 绘制
 
-    private func arc(center: CGPoint, radius: CGFloat) -> Path {
+    private func panel(center: CGPoint, radius: CGFloat, size: CGSize) -> some View {
+        Path { path in
+            path.move(to: CGPoint(x: 0, y: size.height))
+            path.addLine(to: CGPoint(x: 0, y: center.y))
+            path.addArc(
+                center: center,
+                radius: radius,
+                startAngle: .degrees(startDegrees),
+                endAngle: .degrees(startDegrees + sweepDegrees),
+                clockwise: false
+            )
+            path.addLine(to: CGPoint(x: size.width, y: size.height))
+            path.closeSubpath()
+        }
+        .fill(
+            LinearGradient(
+                colors: [Color.black.opacity(0.45), Color.black.opacity(0.78)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+    }
+
+    private func arc(center: CGPoint, radius: CGFloat) -> some View {
         Path { path in
             path.addArc(
                 center: center,
@@ -77,22 +108,44 @@ struct ZoomDial: View {
                 clockwise: false
             )
         }
+        .stroke(Color.white.opacity(0.28), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
     }
 
-    private func tick(index: Int, center: CGPoint, radius: CGFloat) -> some View {
-        let t = Double(index) / 20
-        let degrees = startDegrees + sweepDegrees * t
-        let isMajor = index % 5 == 0
-        let inner = radius + 2
-        let outer = radius + (isMajor ? 11 : 6)
-        return Path { path in
-            path.move(to: point(center: center, radius: inner, degrees: degrees))
-            path.addLine(to: point(center: center, radius: outer, degrees: degrees))
+    private func ticks(center: CGPoint, radius: CGFloat) -> some View {
+        ForEach(0...48, id: \.self) { index in
+            let t = Double(index) / 48
+            let degrees = startDegrees + sweepDegrees * t
+            let isMajor = index % 4 == 0
+            Path { path in
+                path.move(to: point(center: center, radius: radius + 2, degrees: degrees))
+                path.addLine(to: point(center: center, radius: radius + (isMajor ? 13 : 7), degrees: degrees))
+            }
+            .stroke(
+                Color.white.opacity(isMajor ? 0.65 : 0.28),
+                style: StrokeStyle(lineWidth: isMajor ? 1.5 : 1, lineCap: .round)
+            )
         }
-        .stroke(
-            Color.white.opacity(isMajor ? 0.55 : 0.25),
-            style: StrokeStyle(lineWidth: isMajor ? 1.6 : 1, lineCap: .round)
-        )
+    }
+
+    private func stopLabel(
+        stop: ZoomStop,
+        isActive: Bool,
+        center: CGPoint,
+        radius: CGFloat
+    ) -> some View {
+        let t = fraction(for: stop.value, in: effectiveRange)
+        let degrees = startDegrees + sweepDegrees * t
+        return VStack(spacing: 1) {
+            Text(stop.label + (isActive ? "×" : ""))
+                .font(.system(size: isActive ? 18 : 15, weight: isActive ? .bold : .medium))
+                .foregroundStyle(isActive ? Color.yellow : Color.white.opacity(0.72))
+            if let millimeters = stop.millimeters {
+                Text(millimeters)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(isActive ? Color.yellow.opacity(0.85) : Color.white.opacity(0.32))
+            }
+        }
+        .position(point(center: center, radius: radius - 38, degrees: degrees))
     }
 
     private func point(center: CGPoint, radius: CGFloat, degrees: Double) -> CGPoint {
@@ -119,15 +172,8 @@ struct ZoomDial: View {
         return low...high
     }
 
-    private var isDefault: Bool {
-        abs(value - 1) < 0.05
-    }
-
-    private var displayText: String {
-        if abs(value - value.rounded()) < 0.05 {
-            return String(format: "%.0f×", value)
-        }
-        return String(format: "%.1f×", value)
+    private func formatted(_ value: CGFloat) -> String {
+        value < 10 ? String(format: "%.1f×", value) : String(format: "%.0f×", value)
     }
 
     private func fraction(for value: CGFloat, in range: ClosedRange<CGFloat>) -> Double {
@@ -144,9 +190,9 @@ struct ZoomDial: View {
     }
 
     private func snappedFraction(_ t: Double, in range: ClosedRange<CGFloat>) -> Double {
-        for stop in stops where range.contains(stop) {
-            let stopT = fraction(for: stop, in: range)
-            if abs(stopT - t) < 0.012 {
+        for stop in stops where range.contains(stop.value) {
+            let stopT = fraction(for: stop.value, in: range)
+            if abs(stopT - t) < 0.014 {
                 return stopT
             }
         }

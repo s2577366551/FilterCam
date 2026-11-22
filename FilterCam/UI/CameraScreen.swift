@@ -64,12 +64,12 @@ struct CameraScreen: View {
                 Spacer()
 
                 bottomControls
-                    .overlay(alignment: .top) {
+                    .overlay(alignment: .bottom) {
                         if isZoomDialVisible {
                             ZoomDial(
                                 value: viewModel.zoomFactor,
                                 range: viewModel.zoomRange,
-                                stops: [0.5, 1, 2, 3, 5, 10],
+                                stops: viewModel.zoomStops,
                                 onChange: { value in
                                     zoomDialTask?.cancel()
                                     viewModel.setZoom(value)
@@ -78,10 +78,9 @@ struct CameraScreen: View {
                                     scheduleZoomDialHide(after: 1.4)
                                 }
                             )
-                            .frame(height: 118)
-                            .padding(.horizontal, 18)
-                            .offset(y: -126)
-                            .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .bottom)))
+                            .frame(height: 200)
+                            .padding(.bottom, 44)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
                     }
             }
@@ -239,26 +238,50 @@ struct CameraScreen: View {
         )
     }
 
-    /// 变焦倍数：点一下回到 1×，长按打开弧形变焦盘。
+    /// 变焦档位：点数字直接切，长按打开弧形变焦盘。
     private var zoomPill: some View {
-        let isZoomed = abs(viewModel.zoomFactor - 1) > 0.01
-        return Text(String(format: "%.1f×", viewModel.zoomFactor))
-            .font(.system(size: Theme.Font.caption, weight: .semibold).monospacedDigit())
-            .foregroundStyle(isZoomed ? Color.yellow : Theme.control)
-            .padding(.horizontal, 10)
-            .frame(height: 26)
-            .background(Theme.overlay, in: Capsule())
-            .contentShape(Capsule())
-            .onTapGesture {
-                viewModel.resetZoom()
+        HStack(spacing: 0) {
+            ForEach(viewModel.zoomPillStops) { stop in
+                let isActive = nearestStopValue == stop.value
+                Text(pillLabel(for: stop, isActive: isActive))
+                    .font(.system(size: Theme.Font.caption, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(isActive ? Color.yellow : Theme.control)
+                    .frame(width: 44, height: 30)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        LongPressGesture(minimumDuration: 0.28)
+                            .onEnded { _ in
+                                showZoomDial()
+                            }
+                            .exclusively(
+                                before: TapGesture().onEnded {
+                                    viewModel.setZoom(stop.value)
+                                    Haptics.selection()
+                                }
+                            )
+                    )
             }
-            .onLongPressGesture(minimumDuration: 0.25) {
-                Haptics.selection()
-                showZoomDial()
-            }
-            .padding(.top, 2)
-            .accessibilityLabel("变焦倍数")
-            .accessibilityHint("轻点回到 1 倍，长按打开变焦盘")
+        }
+        .padding(.horizontal, 6)
+        .background(Theme.overlay, in: Capsule())
+        .padding(.top, 2)
+        .accessibilityLabel("变焦倍数")
+    }
+
+    private var nearestStopValue: CGFloat? {
+        let current = viewModel.zoomFactor
+        return viewModel.zoomPillStops.min {
+            abs($0.value - current) < abs($1.value - current)
+        }?.value
+    }
+
+    private func pillLabel(for stop: ZoomStop, isActive: Bool) -> String {
+        guard isActive else { return stop.label }
+        let current = viewModel.zoomFactor
+        if abs(current - stop.value) < 0.05 {
+            return stop.label + "×"
+        }
+        return String(format: current < 10 ? "%.1f×" : "%.0f×", current)
     }
 
     /// 右下角：水印设置入口。
