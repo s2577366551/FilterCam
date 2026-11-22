@@ -38,6 +38,10 @@ final class DualCameraService: NSObject, CameraServicing {
     private var pipCenter = PiPLayout.defaultCenter
     private let pipLock = NSLock()
 
+    private let zoomLock = NSLock()
+    private var pendingZoom: CGFloat?
+    private var isZoomDraining = false
+
     private var photoContinuation: CheckedContinuation<CapturedPhoto, Error>?
     private var pendingBack: CapturedPhoto?
     private var pendingFront: CapturedPhoto?
@@ -606,16 +610,39 @@ final class DualCameraService: NSObject, CameraServicing {
     }
 
     func setZoomFactor(_ factor: CGFloat) {
-        sessionQueue.async {
-            guard let device = self.backInput?.device else { return }
-            guard (try? device.lockForConfiguration()) != nil else { return }
-            defer { device.unlockForConfiguration() }
-            let clamped = min(
-                max(factor, device.minAvailableVideoZoomFactor),
-                device.maxAvailableVideoZoomFactor
-            )
-            device.videoZoomFactor = clamped
+        // 合并高频请求，只应用最新值，拖动时不会越拖越滞后。
+        zoomLock.lock()
+        pendingZoom = factor
+        let shouldSchedule = !isZoomDraining
+        isZoomDraining = true
+        zoomLock.unlock()
+        guard shouldSchedule else { return }
+        sessionQueue.async { self.drainZoom() }
+    }
+
+    private func drainZoom() {
+        while true {
+            zoomLock.lock()
+            guard let value = pendingZoom else {
+                isZoomDraining = false
+                zoomLock.unlock()
+                return
+            }
+            pendingZoom = nil
+            zoomLock.unlock()
+            applyZoom(value)
         }
+    }
+
+    private func applyZoom(_ factor: CGFloat) {
+        guard let device = backInput?.device else { return }
+        guard (try? device.lockForConfiguration()) != nil else { return }
+        defer { device.unlockForConfiguration() }
+        let clamped = min(
+            max(factor, device.minAvailableVideoZoomFactor),
+            device.maxAvailableVideoZoomFactor
+        )
+        device.videoZoomFactor = clamped
     }
 
     // MARK: - 设备与格式

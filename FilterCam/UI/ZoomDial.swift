@@ -32,9 +32,51 @@ struct ZoomDial: View {
             let isAtStop = nearest.map { abs($0.value - value) < 0.05 } ?? false
 
             ZStack(alignment: .topLeading) {
-                panel(center: center, radius: radius, size: size)
-                arc(center: center, radius: radius)
-                ticks(center: center, radius: radius)
+                // 静态部分一次性用 Canvas 画完，避免每次变焦重建几十个 Path 视图造成卡顿。
+                Canvas { context, canvasSize in
+                    let panel = panelPath(center: center, radius: radius, size: canvasSize)
+                    context.fill(
+                        panel,
+                        with: .linearGradient(
+                            Gradient(colors: [
+                                Color.black.opacity(0.45),
+                                Color.black.opacity(0.78)
+                            ]),
+                            startPoint: CGPoint(x: 0, y: 0),
+                            endPoint: CGPoint(x: 0, y: canvasSize.height)
+                        )
+                    )
+
+                    context.stroke(
+                        arcPath(center: center, radius: radius),
+                        with: .color(Color.white.opacity(0.28)),
+                        style: StrokeStyle(lineWidth: 1.2, lineCap: .round)
+                    )
+
+                    for index in 0...48 {
+                        let t = Double(index) / 48
+                        let degrees = startDegrees + sweepDegrees * t
+                        let isMajor = index % 4 == 0
+                        var tick = Path()
+                        tick.move(to: point(center: center, radius: radius + 2, degrees: degrees))
+                        tick.addLine(
+                            to: point(
+                                center: center,
+                                radius: radius + (isMajor ? 13 : 7),
+                                degrees: degrees
+                            )
+                        )
+                        context.stroke(
+                            tick,
+                            with: .color(Color.white.opacity(isMajor ? 0.65 : 0.28)),
+                            style: StrokeStyle(
+                                lineWidth: isMajor ? 1.5 : 1,
+                                lineCap: .round
+                            )
+                        )
+                    }
+                }
+                .allowsHitTesting(false)
 
                 ForEach(stops) { stop in
                     if !(stop.value == nearest?.value && !isAtStop) {
@@ -75,7 +117,7 @@ struct ZoomDial: View {
 
     // MARK: - 绘制
 
-    private func panel(center: CGPoint, radius: CGFloat, size: CGSize) -> some View {
+    private func panelPath(center: CGPoint, radius: CGFloat, size: CGSize) -> Path {
         let start = point(center: center, radius: radius, degrees: startDegrees)
         return Path { path in
             path.move(to: CGPoint(x: 0, y: size.height))
@@ -91,16 +133,9 @@ struct ZoomDial: View {
             path.addLine(to: CGPoint(x: size.width, y: size.height))
             path.closeSubpath()
         }
-        .fill(
-            LinearGradient(
-                colors: [Color.black.opacity(0.45), Color.black.opacity(0.78)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
     }
 
-    private func arc(center: CGPoint, radius: CGFloat) -> some View {
+    private func arcPath(center: CGPoint, radius: CGFloat) -> Path {
         Path { path in
             path.addArc(
                 center: center,
@@ -108,23 +143,6 @@ struct ZoomDial: View {
                 startAngle: .degrees(startDegrees),
                 endAngle: .degrees(startDegrees + sweepDegrees),
                 clockwise: false
-            )
-        }
-        .stroke(Color.white.opacity(0.28), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
-    }
-
-    private func ticks(center: CGPoint, radius: CGFloat) -> some View {
-        ForEach(0...48, id: \.self) { index in
-            let t = Double(index) / 48
-            let degrees = startDegrees + sweepDegrees * t
-            let isMajor = index % 4 == 0
-            Path { path in
-                path.move(to: point(center: center, radius: radius + 2, degrees: degrees))
-                path.addLine(to: point(center: center, radius: radius + (isMajor ? 13 : 7), degrees: degrees))
-            }
-            .stroke(
-                Color.white.opacity(isMajor ? 0.65 : 0.28),
-                style: StrokeStyle(lineWidth: isMajor ? 1.5 : 1, lineCap: .round)
             )
         }
     }

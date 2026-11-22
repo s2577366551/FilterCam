@@ -34,6 +34,9 @@ final class CameraService: NSObject, CameraServicing {
     private var stopRecordingContinuation: CheckedContinuation<RecordedVideo, Error>?
     private var recordingStartDate: Date?
     private var recordingURL: URL?
+    private let zoomLock = NSLock()
+    private var pendingZoom: CGFloat?
+    private var isZoomDraining = false
 
     var onFrame: ((CIImage) -> Void)?
     var onStateChange: ((CameraRuntimeState) -> Void)?
@@ -530,8 +533,27 @@ final class CameraService: NSObject, CameraServicing {
     }
 
     func setZoomFactor(_ factor: CGFloat) {
-        sessionQueue.async {
-            self.applyZoom(factor)
+        // 只保留最新一次请求，避免手势高频事件把会话队列堵住导致变焦滞后。
+        zoomLock.lock()
+        pendingZoom = factor
+        let shouldSchedule = !isZoomDraining
+        isZoomDraining = true
+        zoomLock.unlock()
+        guard shouldSchedule else { return }
+        sessionQueue.async { self.drainZoom() }
+    }
+
+    private func drainZoom() {
+        while true {
+            zoomLock.lock()
+            guard let value = pendingZoom else {
+                isZoomDraining = false
+                zoomLock.unlock()
+                return
+            }
+            pendingZoom = nil
+            zoomLock.unlock()
+            applyZoom(value)
         }
     }
 

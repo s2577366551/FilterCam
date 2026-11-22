@@ -210,6 +210,15 @@ final class PhotoLibrarySaver {
         )
     }
 
+    /// 把轨道方向归一化到原点，Core Image 里可以直接用。
+    private func orientedTransform(for track: AVAssetTrack) -> CGAffineTransform {
+        let preferred = track.preferredTransform
+        let rect = CGRect(origin: .zero, size: track.naturalSize).applying(preferred)
+        return preferred.concatenating(
+            CGAffineTransform(translationX: -rect.minX, y: -rect.minY)
+        )
+    }
+
     /// 把两段视频叠成画中画：后摄铺满，前摄是可拖动的小窗。
     private func composePiP(
         backURL: URL,
@@ -250,71 +259,27 @@ final class PhotoLibrarySaver {
             try? audioCompositionTrack.insertTimeRange(backRange, of: audioTrack, at: .zero)
         }
 
-        let backTransform = backTrack.preferredTransform
-        let oriented = backTrack.naturalSize.applying(backTransform)
+        let backTransform = orientedTransform(for: backTrack)
+        let frontTransform = orientedTransform(for: frontTrack)
+        let oriented = CGRect(origin: .zero, size: backTrack.naturalSize)
+            .applying(backTrack.preferredTransform)
         let renderSize = CGSize(width: abs(oriented.width), height: abs(oriented.height))
 
         let videoComposition = AVMutableVideoComposition()
+        // 用 Core Image 自定义合成器，圆角、投影和 3:4 裁切和照片完全一致。
+        videoComposition.customVideoCompositorClass = DualPiPCompositor.self
         videoComposition.renderSize = renderSize
         videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
-
-        let instruction = AVMutableVideoCompositionInstruction()
-        instruction.timeRange = CMTimeRange(start: .zero, duration: composition.duration)
-
-        let backLayer = AVMutableVideoCompositionLayerInstruction(assetTrack: backCompositionTrack)
-        backLayer.setTransform(backTransform, at: .zero)
-
-        let frontLayer = AVMutableVideoCompositionLayerInstruction(assetTrack: frontCompositionTrack)
-        let insetWidth = renderSize.width * PiPLayout.widthRatio
-        let insetHeight = insetWidth / PiPLayout.aspect
-        let margin = renderSize.width * 0.035
-        let halfW = insetWidth / 2
-        let halfH = insetHeight / 2
-        // AV 视频坐标系原点在左上角，和 pipCenter 的显示坐标系一致。
-        let cx = min(
-            max(renderSize.width * pipCenter.x, margin + halfW),
-            renderSize.width - margin - halfW
-        )
-        let cy = min(
-            max(renderSize.height * pipCenter.y, margin + halfH),
-            renderSize.height - margin - halfH
-        )
-        let insetRect = CGRect(
-            x: cx - halfW,
-            y: cy - halfH,
-            width: insetWidth,
-            height: insetHeight
-        )
-        let frontOriented = frontTrack.naturalSize.applying(frontTrack.preferredTransform)
-        let frontSize = CGSize(width: abs(frontOriented.width), height: abs(frontOriented.height))
-        let scale = max(insetRect.width / frontSize.width, insetRect.height / frontSize.height)
-        // 缩放后的画面在小窗里居中（aspect fill，超出部分由主画面盖住边缘）。
-        let scaledWidth = frontSize.width * scale
-        let scaledHeight = frontSize.height * scale
-        let frontTransform = frontTrack.preferredTransform
-            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
-            .concatenating(CGAffineTransform(
-                translationX: insetRect.midX - scaledWidth / 2,
-                y: insetRect.midY - scaledHeight / 2
-            ))
-        frontLayer.setTransform(frontTransform, at: .zero)
-
-        // 把前摄裁成小窗的 3:4 比例（crop 在素材原始像素坐标里，先算好再交给 AV）。
-        let cropRect = insetRect.applying(frontTransform.inverted())
-        let naturalBounds = CGRect(origin: .zero, size: frontTrack.naturalSize)
-        let clampedCrop = cropRect.intersection(naturalBounds)
-        if !clampedCrop.isNull, clampedCrop.width > 1, clampedCrop.height > 1 {
-            frontLayer.setCropRectangle(clampedCrop, at: .zero)
-        }
-
-        // AVFoundation 的 layerInstructions 是「第一个在最上层」，
-        // 所以前摄小窗必须排在前面，后摄主画面排后面。
-        instruction.layerInstructions = [
-            frontLayer as AVVideoCompositionLayerInstruction,
-            backLayer as AVVideoCompositionLayerInstruction
-        ]
         videoComposition.instructions = [
-            instruction as AVVideoCompositionInstructionProtocol
+            DualPiPInstruction(
+                timeRange: CMTimeRange(start: .zero, duration: composition.duration),
+                backTrackID: backCompositionTrack.trackID,
+                frontTrackID: frontCompositionTrack.trackID,
+                backTransform: backTransform,
+                frontTransform: frontTransform,
+                pipCenter: pipCenter,
+                renderSize: renderSize
+            )
         ]
 
         guard let export = AVAssetExportSession(
