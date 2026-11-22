@@ -330,8 +330,20 @@ final class DualCameraService: NSObject, CameraServicing {
         }
     }
 
-    private func addMovieOutputs() throws {
-        guard !movieOutputsAdded, let backInput, let frontInput else { return }
+    /// 录像输出没挂上时补挂一次，避免模式状态和会话状态不同步。
+    private func ensureMovieOutputs() throws {
+        guard !movieOutputsAdded else { return }
+        session.beginConfiguration()
+        do {
+            try addMovieOutputs()
+            session.commitConfiguration()
+        } catch {
+            session.commitConfiguration()
+            throw error
+        }
+    }
+
+    private func addMovieOutputs() throws {        guard !movieOutputsAdded, let backInput, let frontInput else { return }
 
         for output in [backMovieOutput, frontMovieOutput] {
             guard session.canAddOutput(output) else {
@@ -386,7 +398,18 @@ final class DualCameraService: NSObject, CameraServicing {
     func startRecording() async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             sessionQueue.async {
-                guard self.captureMode == .video, self.movieOutputsAdded else {
+                do {
+                    // 模式切换偶尔会被跳过，这里再兜底一次，避免点了录制才报“不是视频模式”。
+                    if self.captureMode != .video {
+                        try self.applyCaptureMode(.video)
+                    } else {
+                        try self.ensureMovieOutputs()
+                    }
+                } catch {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard self.movieOutputsAdded else {
                     continuation.resume(throwing: CameraError.captureFailed("当前不是视频模式"))
                     return
                 }
@@ -884,7 +907,24 @@ extension DualCameraService: AVCaptureFileOutputRecordingDelegate {
             backRecordingResult = nil
             frontRecordingResult = nil
         }
+        // 有一路还没开始就失败时，把 startRecording 的等待也结束掉，避免界面一直卡在录制中。
+        var failedStart: CheckedContinuation<Void, Error>?
+        if !finishedOK, let start = startContinuation {
+            failedStart = start
+            startContinuation = nil
+        }
         recordingLock.unlock()
+
+        if let failedStart {
+            failedStart.resume(throwing: error ?? CameraError.captureFailed("录制失败"))
+            if let backRecordingURL {
+                try? FileManager.default.removeItem(at: backRecordingURL)
+            }
+            if let frontRecordingURL {
+                try? FileManager.default.removeItem(at: frontRecordingURL)
+            }
+            return
+        }
 
         guard let finished, let backResult, let frontResult else { return }
         switch (backResult, frontResult) {

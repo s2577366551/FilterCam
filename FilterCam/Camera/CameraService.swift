@@ -251,9 +251,21 @@ final class CameraService: NSObject, CameraServicing {
         }
     }
 
+    /// 录像输出没挂上时补挂一次。
+    private func ensureMovieOutput() throws {
+        guard !isMovieOutputAdded else { return }
+        session.beginConfiguration()
+        defer { session.commitConfiguration() }
+        guard session.canAddOutput(movieOutput) else {
+            throw CameraError.configurationFailed("无法添加录像输出")
+        }
+        session.addOutput(movieOutput)
+        movieOutput.movieFragmentInterval = .invalid
+        isMovieOutputAdded = true
+    }
+
     /// 只在用户已授权麦克风时加入音频输入；拒绝授权也能录无声视频。
-    private func addAudioInputIfPossible() {
-        guard audioInput == nil else { return }
+    private func addAudioInputIfPossible() {        guard audioInput == nil else { return }
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
               let device = AVCaptureDevice.default(for: .audio),
               let input = try? AVCaptureDeviceInput(device: device),
@@ -276,7 +288,18 @@ final class CameraService: NSObject, CameraServicing {
     func startRecording() async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             sessionQueue.async {
-                guard self.captureMode == .video else {
+                do {
+                    // 模式状态不同步时兜底，避免点了录制才报“不是视频模式”。
+                    if self.captureMode != .video {
+                        try self.applyCaptureMode(.video)
+                    } else {
+                        try self.ensureMovieOutput()
+                    }
+                } catch {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard self.captureMode == .video, self.isMovieOutputAdded else {
                     continuation.resume(throwing: CameraError.captureFailed("当前不是视频模式"))
                     return
                 }
