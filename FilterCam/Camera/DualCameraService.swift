@@ -1,6 +1,8 @@
+import AudioToolbox
 import AVFoundation
 import CoreImage
 import CoreMedia
+import CoreVideo
 import ImageIO
 
 /// 前后双摄：后摄主画面，前摄贴在右上角。
@@ -11,8 +13,9 @@ final class DualCameraService: NSObject, CameraServicing {
     private let session = AVCaptureMultiCamSession()
     private let sessionQueue = DispatchQueue(label: "com.filtercam.dual.session")
     private let videoQueue = DispatchQueue(label: "com.filtercam.dual.video", qos: .userInitiated)
+    private let audioQueue = DispatchQueue(label: "com.filtercam.dual.audio", qos: .userInitiated)
+    private let writerQueue = DispatchQueue(label: "com.filtercam.dual.writer", qos: .userInitiated)
     private let photoLock = NSLock()
-    private let recordingLock = NSLock()
 
     private var backInput: AVCaptureDeviceInput?
     private var frontInput: AVCaptureDeviceInput?
@@ -20,16 +23,14 @@ final class DualCameraService: NSObject, CameraServicing {
 
     private let backVideoOutput = AVCaptureVideoDataOutput()
     private let frontVideoOutput = AVCaptureVideoDataOutput()
+    private let audioOutput = AVCaptureAudioDataOutput()
     private let backPhotoOutput = AVCapturePhotoOutput()
     private let frontPhotoOutput = AVCapturePhotoOutput()
-    private let backMovieOutput = AVCaptureMovieFileOutput()
-    private let frontMovieOutput = AVCaptureMovieFileOutput()
 
     private var captureMode: CaptureMode = .photo
     private var flashMode: FlashMode = .auto
     private var isConfigured = false
     private var isObserving = false
-    private var movieOutputsAdded = false
 
     private var latestBack: CIImage?
     private var latestFront: CIImage?
@@ -46,13 +47,18 @@ final class DualCameraService: NSObject, CameraServicing {
     private var pendingBack: CapturedPhoto?
     private var pendingFront: CapturedPhoto?
 
-    private var startContinuation: CheckedContinuation<Void, Error>?
-    private var stopContinuation: CheckedContinuation<RecordedVideo, Error>?
-    private var backRecordingURL: URL?
-    private var frontRecordingURL: URL?
-    private var backRecordingResult: Result<URL, Error>?
-    private var frontRecordingResult: Result<URL, Error>?
-    private var startedOutputs = 0
+    // 实时写入：后摄帧作为时钟，合成后直接写 AVAssetWriter。
+    // AVCaptureMovieFileOutput 在前后双摄下不能同时录两路，所以视频走这条链路。
+    private let ciContext = CIContext(options: [.cacheIntermediates: false])
+    private var assetWriter: AVAssetWriter?
+    private var writerVideoInput: AVAssetWriterInput?
+    private var writerAudioInput: AVAssetWriterInput?
+    private var writerURL: URL?
+    private var writerSize = CGSize(width: 1080, height: 1920)
+    private var writerStarted = false
+    private var writerActive = false
+    private var writerStartPTS = CMTime.zero
+    private var writerLastPTS = CMTime.zero
 
     var onFrame: ((CIImage) -> Void)?
     var onStateChange: ((CameraRuntimeState) -> Void)?
@@ -94,12 +100,7 @@ final class DualCameraService: NSObject, CameraServicing {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             sessionQueue.async {
                 CrashLogger.breadcrumb("双摄: 开始停止")
-                if self.backMovieOutput.isRecording {
-                    self.backMovieOutput.stopRecording()
-                }
-                if self.frontMovieOutput.isRecording {
-                    self.frontMovieOutput.stopRecording()
-                }
+                self.cancelWriter()
                 if self.session.isRunning {
                     self.session.stopRunning()
                 }
@@ -279,7 +280,7 @@ final class DualCameraService: NSObject, CameraServicing {
 
     private func applyCaptureMode(_ mode: CaptureMode) throws {
         guard mode != captureMode else { return }
-        guard !backMovieOutput.isRecording else {
+        guard !isWriterActive else {
             throw CameraError.captureFailed("录制中不能切换模式")
         }
 
@@ -288,9 +289,9 @@ final class DualCameraService: NSObject, CameraServicing {
             switch mode {
             case .video:
                 removePhotoOutputs()
-                try addMovieOutputs()
+                addAudioIfPossible()
             case .photo:
-                removeMovieOutputs()
+                removeAudio()
                 try addPhotoOutputsIfNeeded()
             }
             session.commitConfiguration()
@@ -299,6 +300,10 @@ final class DualCameraService: NSObject, CameraServicing {
             throw error
         }
         captureMode = mode
+    }
+
+    private var isWriterActive: Bool {
+        writerQueue.sync { writerActive }
     }
 
     private func addPhotoOutputsIfNeeded() throws {
@@ -334,67 +339,50 @@ final class DualCameraService: NSObject, CameraServicing {
         }
     }
 
-    /// 录像输出没挂上时补挂一次，避免模式状态和会话状态不同步。
-    private func ensureMovieOutputs() throws {
-        guard !movieOutputsAdded else { return }
-        session.beginConfiguration()
-        do {
-            try addMovieOutputs()
-            session.commitConfiguration()
-        } catch {
-            session.commitConfiguration()
-            throw error
-        }
-    }
-
-    private func addMovieOutputs() throws {        guard !movieOutputsAdded, let backInput, let frontInput else { return }
-
-        for output in [backMovieOutput, frontMovieOutput] {
-            guard session.canAddOutput(output) else {
-                throw CameraError.configurationFailed("无法添加录像输出")
-            }
-            session.addOutputWithNoConnections(output)
-        }
-        guard addConnection(input: backInput, output: backMovieOutput, mirrored: false) != nil,
-              addConnection(input: frontInput, output: frontMovieOutput, mirrored: true) != nil else {
-            throw CameraError.configurationFailed("无法连接前后摄像头录像")
-        }
-        backMovieOutput.movieFragmentInterval = .invalid
-        frontMovieOutput.movieFragmentInterval = .invalid
-        movieOutputsAdded = true
-
-        addAudioInputIfPossible()
-    }
-
-    private func removeMovieOutputs() {
-        guard movieOutputsAdded else { return }
-        if session.outputs.contains(where: { $0 === backMovieOutput }) {
-            session.removeOutput(backMovieOutput)
-        }
-        if session.outputs.contains(where: { $0 === frontMovieOutput }) {
-            session.removeOutput(frontMovieOutput)
-        }
-        movieOutputsAdded = false
-        if let audioInput {
-            session.removeInput(audioInput)
-            self.audioInput = nil
-        }
-    }
-
-    private func addAudioInputIfPossible() {
+    /// 视频模式挂一路麦克风数据输出；没授权也能录无声视频。
+    private func addAudioIfPossible() {
         guard audioInput == nil else { return }
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
               let device = AVCaptureDevice.default(for: .audio),
               let input = try? AVCaptureDeviceInput(device: device),
               session.canAddInput(input) else { return }
         session.addInputWithNoConnections(input)
-        if let port = input.ports(for: .audio, sourceDeviceType: device.deviceType, sourceDevicePosition: .unspecified).first {
-            let connection = AVCaptureConnection(inputPorts: [port], output: backMovieOutput)
-            if session.canAddConnection(connection) {
-                session.addConnection(connection)
-            }
+
+        guard session.canAddOutput(audioOutput) else {
+            session.removeInput(input)
+            return
         }
+        session.addOutputWithNoConnections(audioOutput)
+
+        guard let port = input.ports(
+            for: .audio,
+            sourceDeviceType: device.deviceType,
+            sourceDevicePosition: .unspecified
+        ).first else {
+            session.removeOutput(audioOutput)
+            session.removeInput(input)
+            return
+        }
+        let connection = AVCaptureConnection(inputPorts: [port], output: audioOutput)
+        guard session.canAddConnection(connection) else {
+            session.removeOutput(audioOutput)
+            session.removeInput(input)
+            return
+        }
+        session.addConnection(connection)
+        audioOutput.setSampleBufferDelegate(self, queue: audioQueue)
         audioInput = input
+    }
+
+    private func removeAudio() {
+        audioOutput.setSampleBufferDelegate(nil, queue: nil)
+        if session.outputs.contains(where: { $0 === audioOutput }) {
+            session.removeOutput(audioOutput)
+        }
+        if let audioInput {
+            session.removeInput(audioInput)
+            self.audioInput = nil
+        }
     }
 
     // MARK: - 录制
@@ -403,62 +391,190 @@ final class DualCameraService: NSObject, CameraServicing {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             sessionQueue.async {
                 do {
-                    // 模式切换偶尔会被跳过，这里再兜底一次，避免点了录制才报“不是视频模式”。
                     if self.captureMode != .video {
                         try self.applyCaptureMode(.video)
-                    } else {
-                        try self.ensureMovieOutputs()
                     }
                 } catch {
                     continuation.resume(throwing: error)
                     return
                 }
-                guard self.movieOutputsAdded else {
+                guard self.captureMode == .video else {
                     continuation.resume(throwing: CameraError.captureFailed("当前不是视频模式"))
                     return
                 }
-                guard !self.backMovieOutput.isRecording,
-                      !self.frontMovieOutput.isRecording else {
-                    continuation.resume(throwing: CameraError.captureFailed("正在录制中"))
-                    return
+                do {
+                    try self.writerQueue.sync { try self.beginWriter() }
+                    CrashLogger.breadcrumb("双摄: 开始录制")
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
                 }
-
-                let backURL = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("filtercam-dual-back-\(UUID().uuidString).mov")
-                let frontURL = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("filtercam-dual-front-\(UUID().uuidString).mov")
-
-                self.recordingLock.lock()
-                self.backRecordingURL = backURL
-                self.frontRecordingURL = frontURL
-                self.backRecordingResult = nil
-                self.frontRecordingResult = nil
-                self.startedOutputs = 0
-                self.startContinuation = continuation
-                self.recordingLock.unlock()
-
-                CrashLogger.breadcrumb("双摄: 开始录制")
-                self.backMovieOutput.startRecording(to: backURL, recordingDelegate: self)
-                self.frontMovieOutput.startRecording(to: frontURL, recordingDelegate: self)
             }
         }
     }
 
     func stopRecording() async throws -> RecordedVideo {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<RecordedVideo, Error>) in
-            sessionQueue.async {
-                guard self.backMovieOutput.isRecording,
-                      self.frontMovieOutput.isRecording else {
+            writerQueue.async {
+                guard self.writerActive,
+                      let writer = self.assetWriter,
+                      let url = self.writerURL else {
                     continuation.resume(throwing: CameraError.captureFailed("当前没有在录制"))
                     return
                 }
-                self.recordingLock.lock()
-                self.stopContinuation = continuation
-                self.recordingLock.unlock()
-                self.backMovieOutput.stopRecording()
-                self.frontMovieOutput.stopRecording()
+                self.writerActive = false
+                self.writerVideoInput?.markAsFinished()
+                self.writerAudioInput?.markAsFinished()
+                let rawDuration = CMTimeSubtract(self.writerLastPTS, self.writerStartPTS)
+                let duration = rawDuration.isValid ? rawDuration : .zero
+                let size = self.writerSize
+                writer.finishWriting {
+                    if writer.status == .completed {
+                        continuation.resume(returning: RecordedVideo(
+                            url: url,
+                            duration: duration,
+                            pixelWidth: Int(abs(size.width)),
+                            pixelHeight: Int(abs(size.height)),
+                            frontURL: nil
+                        ))
+                        self.writerQueue.async { self.resetWriter(deleteFile: false) }
+                    } else {
+                        continuation.resume(throwing: writer.error ?? CameraError.captureFailed("视频写入失败"))
+                        self.writerQueue.async { self.resetWriter(deleteFile: true) }
+                    }
+                }
             }
         }
+    }
+
+    private func beginWriter() throws {
+        guard !writerActive else {
+            throw CameraError.captureFailed("正在录制中")
+        }
+        // 只清状态，不删旧文件：上一段视频可能还在保存队列里。
+        resetWriter(deleteFile: false)
+
+        frameLock.lock()
+        let size = latestBack?.extent.size ?? CGSize(width: 1080, height: 1920)
+        frameLock.unlock()
+        writerSize = CGSize(width: abs(size.width), height: abs(size.height))
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("filtercam-dual-\(UUID().uuidString).mov")
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+
+        let videoSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: Int(writerSize.width),
+            AVVideoHeightKey: Int(writerSize.height),
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: 16_000_000,
+                AVVideoExpectedSourceFrameRateKey: 30,
+                AVVideoMaxKeyFrameIntervalKey: 60
+            ]
+        ]
+        let videoWriter = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        videoWriter.expectsMediaDataInRealTime = true
+        guard writer.canAdd(videoWriter) else {
+            throw CameraError.captureFailed("无法创建视频写入")
+        }
+        writer.add(videoWriter)
+
+        var audioWriter: AVAssetWriterInput?
+        if audioInput != nil {
+            let audioSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVNumberOfChannelsKey: 1,
+                AVSampleRateKey: 44_100,
+                AVEncoderBitRateKey: 128_000
+            ]
+            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+            input.expectsMediaDataInRealTime = true
+            if writer.canAdd(input) {
+                writer.add(input)
+                audioWriter = input
+            }
+        }
+
+        guard writer.startWriting() else {
+            throw writer.error ?? CameraError.captureFailed("视频写入启动失败")
+        }
+
+        assetWriter = writer
+        writerVideoInput = videoWriter
+        writerAudioInput = audioWriter
+        writerURL = url
+        writerStarted = false
+        writerActive = true
+        writerStartPTS = .zero
+        writerLastPTS = .zero
+    }
+
+    private func appendVideo(_ image: CIImage, at pts: CMTime) {
+        guard writerActive,
+              let writer = assetWriter,
+              writer.status == .writing,
+              let input = writerVideoInput,
+              input.isReadyForMoreMediaData else { return }
+
+        if !writerStarted {
+            writer.startSession(atSourceTime: pts)
+            writerStartPTS = pts
+            writerStarted = true
+        }
+        writerLastPTS = pts
+
+        guard let pool = input.pixelBufferPool else { return }
+        var buffer: CVPixelBuffer?
+        _ = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &buffer)
+        guard let destination = buffer else { return }
+
+        let extent = image.extent
+        let normalized = image.transformed(
+            by: CGAffineTransform(translationX: -extent.origin.x, y: -extent.origin.y)
+        )
+        ciContext.render(
+            normalized,
+            to: destination,
+            bounds: CGRect(origin: .zero, size: writerSize),
+            colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
+        input.append(destination, withPresentationTime: pts)
+    }
+
+    private func appendAudio(_ sampleBuffer: CMSampleBuffer) {
+        guard writerActive,
+              writerStarted,
+              let input = writerAudioInput,
+              input.isReadyForMoreMediaData else { return }
+        input.append(sampleBuffer)
+    }
+
+    private func cancelWriter() {
+        writerQueue.sync {
+            guard writerActive || assetWriter != nil else { return }
+            writerActive = false
+            writerVideoInput?.markAsFinished()
+            writerAudioInput?.markAsFinished()
+            if let writer = assetWriter, writer.status == .writing {
+                writer.cancelWriting()
+            }
+            resetWriter(deleteFile: true)
+        }
+    }
+
+    private func resetWriter(deleteFile: Bool) {
+        if deleteFile, let writerURL {
+            try? FileManager.default.removeItem(at: writerURL)
+        }
+        assetWriter = nil
+        writerVideoInput = nil
+        writerAudioInput = nil
+        writerURL = nil
+        writerStarted = false
+        writerActive = false
+        writerStartPTS = .zero
+        writerLastPTS = .zero
     }
 
     // MARK: - 照片
@@ -764,12 +880,22 @@ final class DualCameraService: NSObject, CameraServicing {
     }
 }
 
-extension DualCameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
+extension DualCameraService: AVCaptureVideoDataOutputSampleBufferDelegate,
+                             AVCaptureAudioDataOutputSampleBufferDelegate {
     func captureOutput(
         _ output: AVCaptureOutput,
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
+        if output === audioOutput {
+            writerQueue.sync {
+                if writerActive {
+                    appendAudio(sampleBuffer)
+                }
+            }
+            return
+        }
+
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let image = CIImage(cvPixelBuffer: buffer)
 
@@ -785,13 +911,18 @@ extension DualCameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
 
         // 只跟随后摄的帧率合成，前摄帧只用来更新小窗。
         guard output === backVideoOutput, let back else { return }
-        onFrame?(
-            PiPComposer.compose(
-                back: back,
-                front: front,
-                center: currentPiPCenter
-            )
+        let composed = PiPComposer.compose(
+            back: back,
+            front: front,
+            center: currentPiPCenter
         )
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        writerQueue.sync {
+            if writerActive {
+                appendVideo(composed, at: pts)
+            }
+        }
+        onFrame?(composed)
     }
 }
 
@@ -883,99 +1014,5 @@ extension DualCameraService: AVCapturePhotoCaptureDelegate {
             return CIImage(cgImage: cgImage)
         }
         return nil
-    }
-}
-
-extension DualCameraService: AVCaptureFileOutputRecordingDelegate {
-    func fileOutput(
-        _ output: AVCaptureFileOutput,
-        didStartRecordingTo fileURL: URL,
-        from connections: [AVCaptureConnection]
-    ) {
-        recordingLock.lock()
-        startedOutputs += 1
-        let allStarted = startedOutputs >= 2
-        let continuation = allStarted ? startContinuation : nil
-        if allStarted { startContinuation = nil }
-        recordingLock.unlock()
-        continuation?.resume()
-    }
-
-    func fileOutput(
-        _ output: AVCaptureFileOutput,
-        didFinishRecordingTo outputFileURL: URL,
-        from connections: [AVCaptureConnection],
-        error: Error?
-    ) {
-        recordingLock.lock()
-        let finishedOK: Bool = {
-            guard let error = error as NSError? else { return true }
-            if let flag = error.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool {
-                return flag
-            }
-            return false
-        }()
-        let result: Result<URL, Error> = finishedOK
-            ? .success(outputFileURL)
-            : .failure(error ?? CameraError.captureFailed("录制失败"))
-
-        if output === backMovieOutput {
-            backRecordingResult = result
-        } else {
-            frontRecordingResult = result
-        }
-
-        let backResult = backRecordingResult
-        let frontResult = frontRecordingResult
-        var finished: CheckedContinuation<RecordedVideo, Error>?
-        if let backResult, let frontResult {
-            finished = stopContinuation
-            stopContinuation = nil
-            backRecordingResult = nil
-            frontRecordingResult = nil
-        }
-        // 有一路还没开始就失败时，把 startRecording 的等待也结束掉，避免界面一直卡在录制中。
-        var failedStart: CheckedContinuation<Void, Error>?
-        if !finishedOK, let start = startContinuation {
-            failedStart = start
-            startContinuation = nil
-        }
-        recordingLock.unlock()
-
-        if let failedStart {
-            failedStart.resume(throwing: error ?? CameraError.captureFailed("录制失败"))
-            if let backRecordingURL {
-                try? FileManager.default.removeItem(at: backRecordingURL)
-            }
-            if let frontRecordingURL {
-                try? FileManager.default.removeItem(at: frontRecordingURL)
-            }
-            return
-        }
-
-        guard let finished, let backResult, let frontResult else { return }
-        switch (backResult, frontResult) {
-        case (.success(let backURL), .success(let frontURL)):
-            let asset = AVURLAsset(url: backURL)
-            let track = asset.tracks(withMediaType: .video).first
-            let natural = track?.naturalSize ?? .zero
-            finished.resume(
-                returning: RecordedVideo(
-                    url: backURL,
-                    duration: asset.duration,
-                    pixelWidth: Int(abs(natural.width)),
-                    pixelHeight: Int(abs(natural.height)),
-                    frontURL: frontURL
-                )
-            )
-        case (.failure(let error), _), (_, .failure(let error)):
-            if let backRecordingURL {
-                try? FileManager.default.removeItem(at: backRecordingURL)
-            }
-            if let frontRecordingURL {
-                try? FileManager.default.removeItem(at: frontRecordingURL)
-            }
-            finished.resume(throwing: CameraError.captureFailed(error.localizedDescription))
-        }
     }
 }
