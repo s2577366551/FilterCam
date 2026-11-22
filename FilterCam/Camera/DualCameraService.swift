@@ -72,18 +72,21 @@ final class DualCameraService: NSObject, CameraServicing {
         }
     }
 
-    func stop() {
-        sessionQueue.async {
-            if self.backMovieOutput.isRecording {
-                self.backMovieOutput.stopRecording()
+    func stop() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            sessionQueue.async {
+                if self.backMovieOutput.isRecording {
+                    self.backMovieOutput.stopRecording()
+                }
+                if self.frontMovieOutput.isRecording {
+                    self.frontMovieOutput.stopRecording()
+                }
+                if self.session.isRunning {
+                    self.session.stopRunning()
+                }
+                self.onStateChange?(.idle)
+                continuation.resume()
             }
-            if self.frontMovieOutput.isRecording {
-                self.frontMovieOutput.stopRecording()
-            }
-            if self.session.isRunning {
-                self.session.stopRunning()
-            }
-            self.onStateChange?(.idle)
         }
     }
 
@@ -172,6 +175,9 @@ final class DualCameraService: NSObject, CameraServicing {
             Self.applyVideoFormat(for: frontDevice, width: 1280, height: 720)
         }
         Log.camera.info("双摄硬件占用: \(self.session.hardwareCost)")
+        guard session.hardwareCost <= 1.0 else {
+            throw CameraError.configurationFailed("双摄超出硬件能力，请关闭其他相机应用后重试")
+        }
 
         isConfigured = true
     }
@@ -194,11 +200,13 @@ final class DualCameraService: NSObject, CameraServicing {
             return nil
         }
         session.addConnection(connection)
+        // 多摄会话里必须先关闭自动镜像，再手动设置，否则会抛异常。
+        if connection.isVideoMirroringSupported {
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = mirrored
+        }
         if connection.isVideoRotationAngleSupported(90) {
             connection.videoRotationAngle = 90
-        }
-        if connection.isVideoMirroringSupported {
-            connection.isVideoMirrored = mirrored
         }
         return connection
     }
@@ -527,15 +535,30 @@ final class DualCameraService: NSObject, CameraServicing {
     }
 
     private static func applyVideoFormat(for device: AVCaptureDevice, width: Int32, height: Int32) {
-        let candidates = device.formats.filter { format in
-            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-            guard dims.width == width, dims.height == height else { return false }
-            return format.videoSupportedFrameRateRanges.contains {
+        // 多摄会话只能使用 isMultiCamSupported == true 的格式。
+        let multiCam = device.formats.filter { $0.isMultiCamSupported }
+        guard !multiCam.isEmpty else {
+            Log.camera.error("\(device.position.rawValue) 没有支持多摄的格式")
+            return
+        }
+        let supports30 = { (format: AVCaptureDevice.Format) in
+            format.videoSupportedFrameRateRanges.contains {
                 $0.minFrameRate <= 30 && $0.maxFrameRate >= 30
             }
         }
-        let best = candidates.max { photoArea($0) < photoArea($1) }
+        let exact = multiCam.filter { format in
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            return dims.width == width && dims.height == height && supports30(format)
+        }
+        let capped = multiCam.filter { format in
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            return dims.width <= 1920 && dims.height <= 1080 && supports30(format)
+        }
+        let best = exact.max { photoArea($0) < photoArea($1) }
+            ?? capped.max { photoArea($0) < photoArea($1) }
+            ?? multiCam.max { photoArea($0) < photoArea($1) }
         guard let best else { return }
+
         do {
             try device.lockForConfiguration()
             defer { device.unlockForConfiguration() }
@@ -543,6 +566,8 @@ final class DualCameraService: NSObject, CameraServicing {
             let duration = CMTime(value: 1, timescale: 30)
             device.activeVideoMinFrameDuration = duration
             device.activeVideoMaxFrameDuration = duration
+            let dims = CMVideoFormatDescriptionGetDimensions(best.formatDescription)
+            Log.camera.info("双摄格式: \(dims.width)x\(dims.height) \(device.position.rawValue)")
         } catch {
             Log.camera.error("双摄设置格式失败: \(error.localizedDescription)")
         }

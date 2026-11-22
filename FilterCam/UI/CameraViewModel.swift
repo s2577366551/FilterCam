@@ -138,7 +138,7 @@ final class CameraViewModel: ObservableObject {
             stopRecordingTimer()
             isRecording = false
         }
-        activeCamera.stop()
+        Task { await activeCamera.stop() }
     }
 
     func retry() {
@@ -220,7 +220,7 @@ final class CameraViewModel: ObservableObject {
         Task {
             activeCamera.onFrame = nil
             activeCamera.onStateChange = nil
-            activeCamera.stop()
+            await activeCamera.stop()
             if turningOn {
                 if isLivePhotoEnabled {
                     _ = await activeCamera.setLivePhotoEnabled(false)

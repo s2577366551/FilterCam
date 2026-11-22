@@ -97,7 +97,7 @@ protocol CameraServicing: AnyObject {
     var onStateChange: ((CameraRuntimeState) -> Void)? { get set }
 
     func start() async throws
-    func stop()
+    func stop() async
     func switchCamera() async throws
     func setFlashMode(_ mode: FlashMode)
     func setPhotoResolution(_ resolution: PhotoResolution)

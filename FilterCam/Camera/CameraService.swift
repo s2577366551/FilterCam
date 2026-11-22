@@ -53,15 +53,18 @@ final class CameraService: NSObject, CameraServicing {
         }
     }
 
-    func stop() {
-        sessionQueue.async {
-            if self.movieOutput.isRecording {
-                self.movieOutput.stopRecording()
+    func stop() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            sessionQueue.async {
+                if self.movieOutput.isRecording {
+                    self.movieOutput.stopRecording()
+                }
+                if self.session.isRunning {
+                    self.session.stopRunning()
+                }
+                self.onStateChange?(.idle)
+                continuation.resume()
             }
-            if self.session.isRunning {
-                self.session.stopRunning()
-            }
-            self.onStateChange?(.idle)
         }
     }
 
