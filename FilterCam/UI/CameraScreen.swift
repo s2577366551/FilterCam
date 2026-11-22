@@ -5,6 +5,7 @@ import UIKit
 struct CameraScreen: View {
     @StateObject private var viewModel: CameraViewModel
     @Environment(\.scenePhase) private var scenePhase
+    @State private var pinchStartZoom: CGFloat?
 
     init() {
         _viewModel = StateObject(
@@ -196,6 +197,8 @@ struct CameraScreen: View {
             }
             .padding(.horizontal, 24)
 
+            zoomPill
+
             modePicker
                 .padding(.top, 4)
         }
@@ -206,6 +209,25 @@ struct CameraScreen: View {
                 .contentShape(Rectangle())
                 .onTapGesture { }
         )
+    }
+
+    /// 变焦倍数：双指缩放后显示，点一下回到 1×。
+    private var zoomPill: some View {
+        let isZoomed = abs(viewModel.zoomFactor - 1) > 0.01
+        return Button {
+            viewModel.resetZoom()
+        } label: {
+            Text(String(format: "%.1f×", viewModel.zoomFactor))
+                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                .foregroundStyle(Theme.control)
+                .padding(.horizontal, 10)
+                .frame(height: 26)
+                .background(Theme.overlay, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .opacity(isZoomed ? 1 : 0)
+        .disabled(!isZoomed)
+        .padding(.top, 2)
     }
 
     /// 右下角：水印设置入口。
@@ -329,6 +351,18 @@ struct CameraScreen: View {
                 SpatialTapGesture()
                     .onEnded { value in
                         viewModel.focus(at: value.location, in: geo.size)
+                    }
+            )
+            .simultaneousGesture(
+                MagnifyGesture()
+                    .onChanged { value in
+                        if pinchStartZoom == nil {
+                            pinchStartZoom = viewModel.zoomFactor
+                        }
+                        viewModel.setZoom((pinchStartZoom ?? 1) * value.magnification)
+                    }
+                    .onEnded { _ in
+                        pinchStartZoom = nil
                     }
             )
         }

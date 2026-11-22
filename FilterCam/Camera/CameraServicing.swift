@@ -120,6 +120,11 @@ protocol CameraServicing: AnyObject {
     /// 恢复连续自动对焦。
     func resumeAutoFocus() async throws
 
+    /// 当前摄像头的变焦范围（1 = 1×）。
+    var zoomRange: ClosedRange<CGFloat> { get }
+    /// 设置变焦倍数。
+    func setZoomFactor(_ factor: CGFloat)
+
     /// 当前是否为前后双摄（同时开启）模式。
     var isDualCamera: Bool { get }
 }

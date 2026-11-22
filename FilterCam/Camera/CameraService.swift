@@ -480,6 +480,26 @@ final class CameraService: NSObject, CameraServicing {
         }
     }
 
+    // MARK: - 变焦
+
+    var zoomRange: ClosedRange<CGFloat> {
+        guard let device = videoInput?.device else { return 1...1 }
+        return device.minAvailableVideoZoomFactor...device.maxAvailableVideoZoomFactor
+    }
+
+    func setZoomFactor(_ factor: CGFloat) {
+        sessionQueue.async {
+            guard let device = self.videoInput?.device else { return }
+            guard (try? device.lockForConfiguration()) != nil else { return }
+            defer { device.unlockForConfiguration() }
+            let clamped = min(
+                max(factor, device.minAvailableVideoZoomFactor),
+                device.maxAvailableVideoZoomFactor
+            )
+            device.videoZoomFactor = clamped
+        }
+    }
+
     private func configureIfNeeded() throws {
         guard !isConfigured else { return }
         session.beginConfiguration()

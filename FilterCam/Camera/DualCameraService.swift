@@ -173,6 +173,9 @@ final class DualCameraService: NSObject, CameraServicing {
             Log.camera.info("双摄 1080p 超出预算，退回 720p")
             Self.applyVideoFormat(for: backDevice, width: 1280, height: 720)
             Self.applyVideoFormat(for: frontDevice, width: 1280, height: 720)
+            // 格式变了，拍照上限也要跟着改，否则拍照时会因尺寸不合法崩溃。
+            Self.applyMaxPhotoDimensions(to: backPhotoOutput, device: backDevice)
+            Self.applyMaxPhotoDimensions(to: frontPhotoOutput, device: frontDevice)
         }
         Log.camera.info("双摄硬件占用: \(self.session.hardwareCost)")
         guard session.hardwareCost <= 1.0 else {
@@ -521,6 +524,26 @@ final class DualCameraService: NSObject, CameraServicing {
         }
         if device.isExposureModeSupported(.continuousAutoExposure) {
             device.exposureMode = .continuousAutoExposure
+        }
+    }
+
+    // MARK: - 变焦（只作用于后摄主画面）
+
+    var zoomRange: ClosedRange<CGFloat> {
+        guard let device = backInput?.device else { return 1...1 }
+        return device.minAvailableVideoZoomFactor...device.maxAvailableVideoZoomFactor
+    }
+
+    func setZoomFactor(_ factor: CGFloat) {
+        sessionQueue.async {
+            guard let device = self.backInput?.device else { return }
+            guard (try? device.lockForConfiguration()) != nil else { return }
+            defer { device.unlockForConfiguration() }
+            let clamped = min(
+                max(factor, device.minAvailableVideoZoomFactor),
+                device.maxAvailableVideoZoomFactor
+            )
+            device.videoZoomFactor = clamped
         }
     }
 

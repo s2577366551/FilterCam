@@ -29,6 +29,7 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var focusReticle: FocusReticle?
     @Published private(set) var isManualFocusEnabled = false
     @Published private(set) var manualFocus: Float = 0.5
+    @Published private(set) var zoomFactor: CGFloat = 1
     @Published private(set) var photoResolution: PhotoResolution = .standard
     @Published private(set) var isLivePhotoEnabled = false
     @Published private(set) var captureMode: CaptureMode = .photo
@@ -196,6 +197,7 @@ final class CameraViewModel: ObservableObject {
                 isFrontCamera.toggle()
                 isManualFocusEnabled = false
                 focusReticle = nil
+                zoomFactor = 1
                 settingsLock.lock()
                 didCaptureThumbnailSource = false
                 frameCount = 0
@@ -241,6 +243,8 @@ final class CameraViewModel: ObservableObject {
                 try await activeCamera.start()
                 activeCamera.setFlashMode(flashMode)
                 activeCamera.setPhotoResolution(photoResolution)
+                zoomFactor = 1
+                activeCamera.setZoomFactor(1)
                 if captureMode == .video {
                     try? await activeCamera.setCaptureMode(.video)
                 }
@@ -447,6 +451,28 @@ final class CameraViewModel: ObservableObject {
         guard isManualFocusEnabled else { return }
         let target = manualFocus
         Task { try? await activeCamera.setManualFocus(target) }
+    }
+
+    // MARK: - 变焦
+
+    var zoomRange: ClosedRange<CGFloat> {
+        let range = activeCamera.zoomRange
+        return min(range.lowerBound, 1)...max(range.upperBound, 1)
+    }
+
+    func setZoom(_ factor: CGFloat) {
+        let range = zoomRange
+        let clamped = min(max(factor, range.lowerBound), range.upperBound)
+        guard abs(clamped - zoomFactor) > 0.005 else { return }
+        zoomFactor = clamped
+        activeCamera.setZoomFactor(clamped)
+    }
+
+    func resetZoom() {
+        guard abs(zoomFactor - 1) > 0.01 else { return }
+        zoomFactor = 1
+        activeCamera.setZoomFactor(1)
+        Haptics.selection()
     }
 
     private func showReticle(at point: CGPoint, locked: Bool) {
@@ -667,6 +693,7 @@ final class CameraViewModel: ObservableObject {
     private func runSession() async {
         do {
             try await activeCamera.start()
+            activeCamera.setZoomFactor(zoomFactor)
             state = .running
         } catch let error as CameraError {
             switch error {
