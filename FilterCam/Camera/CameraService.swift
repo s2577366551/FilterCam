@@ -14,6 +14,9 @@ final class CameraService: NSObject, CameraServicing {
     private var videoInput: AVCaptureDeviceInput?
     private var audioInput: AVCaptureDeviceInput?
     private var position: AVCaptureDevice.Position = .back
+    private var hasUltraWide = false
+    private var isUsingUltraWide = false
+    private var maxUIZoom: CGFloat = 1
     private var captureMode: CaptureMode = .photo
     private var isMovieOutputAdded = false
     private var flashMode: FlashMode = .auto
@@ -493,24 +496,89 @@ final class CameraService: NSObject, CameraServicing {
         }
     }
 
-    // MARK: - 变焦
+    // MARK: - 变焦（0.5× 走超广角，1× 以上走主摄）
 
+    /// 返回界面倍率范围：有超广角时从 0.5 起。
     var zoomRange: ClosedRange<CGFloat> {
         guard let device = videoInput?.device else { return 1...1 }
-        return device.minAvailableVideoZoomFactor...device.maxAvailableVideoZoomFactor
+        let low: CGFloat = (position == .back && hasUltraWide) ? 0.5 : 1
+        let high = isUsingUltraWide ? maxUIZoom : max(device.maxAvailableVideoZoomFactor, 1)
+        return low...max(high, low)
     }
 
     func setZoomFactor(_ factor: CGFloat) {
         sessionQueue.async {
-            guard let device = self.videoInput?.device else { return }
-            guard (try? device.lockForConfiguration()) != nil else { return }
-            defer { device.unlockForConfiguration() }
-            let clamped = min(
-                max(factor, device.minAvailableVideoZoomFactor),
-                device.maxAvailableVideoZoomFactor
-            )
-            device.videoZoomFactor = clamped
+            self.applyZoom(factor)
         }
+    }
+
+    private func applyZoom(_ factor: CGFloat) {
+        let range = zoomRange
+        let ui = min(max(factor, range.lowerBound), range.upperBound)
+
+        // 录制中不换镜头，避免中断录像。
+        if position == .back, hasUltraWide, !movieOutput.isRecording {
+            let wantsUltraWide = isUsingUltraWide ? ui < 0.98 : ui < 0.92
+            if wantsUltraWide != isUsingUltraWide {
+                do {
+                    try switchLens(toUltraWide: wantsUltraWide)
+                } catch {
+                    Log.camera.error("切换超广角失败: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        guard let device = videoInput?.device else { return }
+        guard (try? device.lockForConfiguration()) != nil else { return }
+        defer { device.unlockForConfiguration() }
+
+        // 超广角镜头的 1.0 对应界面 0.5×，所以界面倍率要乘 2。
+        let raw = isUsingUltraWide ? ui * 2 : ui
+        device.videoZoomFactor = min(
+            max(raw, device.minAvailableVideoZoomFactor),
+            device.maxAvailableVideoZoomFactor
+        )
+    }
+
+    /// 在超广角和主摄之间换输入；保持视频/照片/录像连接可用。
+    private func switchLens(toUltraWide: Bool) throws {
+        guard let device = toUltraWide ? Self.ultraWideDevice() : Self.device(position: .back) else {
+            throw CameraError.noCameraAvailable
+        }
+        let input = try AVCaptureDeviceInput(device: device)
+
+        session.beginConfiguration()
+        defer { session.commitConfiguration() }
+
+        let previous = videoInput
+        if let previous {
+            session.removeInput(previous)
+        }
+        guard session.canAddInput(input) else {
+            if let previous {
+                session.addInput(previous)
+            }
+            throw CameraError.configurationFailed("无法切换镜头")
+        }
+        session.addInput(input)
+        videoInput = input
+        isUsingUltraWide = toUltraWide
+
+        if captureMode == .photo {
+            if let format = Self.bestPhotoFormat(for: device) {
+                Self.applyFormat(format, to: device)
+            }
+            Self.applyMaxPhotoDimensions(to: photoOutput, device: device)
+            if livePhotoEnabled, let standard = Self.standardPhotoDimensions(for: device.activeFormat) {
+                photoOutput.maxPhotoDimensions = standard
+            }
+        }
+        applyConnectionSettings(position: position)
+        if captureMode == .video {
+            applyMovieConnectionSettings()
+        }
+        Self.configureFocus(for: device)
+        Log.camera.info("切换镜头: \(toUltraWide ? "超广角" : "主摄")")
     }
 
     private func configureIfNeeded() throws {
@@ -537,6 +605,11 @@ final class CameraService: NSObject, CameraServicing {
         }
         session.addInput(input)
         videoInput = input
+        if position == .back {
+            hasUltraWide = Self.ultraWideDevice() != nil
+        }
+        maxUIZoom = device.maxAvailableVideoZoomFactor
+        isUsingUltraWide = false
         Self.configureFocus(for: device)
 
         videoOutput.alwaysDiscardsLateVideoFrames = true
@@ -583,6 +656,9 @@ final class CameraService: NSObject, CameraServicing {
         session.addInput(input)
         videoInput = input
         position = newPosition
+        isUsingUltraWide = false
+        hasUltraWide = newPosition == .back && Self.ultraWideDevice() != nil
+        maxUIZoom = device.maxAvailableVideoZoomFactor
         if captureMode == .photo {
             if let format = Self.bestPhotoFormat(for: device) {
                 Self.applyFormat(format, to: device)
@@ -739,10 +815,19 @@ final class CameraService: NSObject, CameraServicing {
     }
 
     private static func device(position: AVCaptureDevice.Position) -> AVCaptureDevice? {
+        // 固定用物理广角镜头，保证 1× 就是主摄；虚拟多摄设备的 raw 倍率语义不同。
         AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInWideAngleCamera, .builtInDualCamera, .builtInTripleCamera],
+            deviceTypes: [.builtInWideAngleCamera],
             mediaType: .video,
             position: position
+        ).devices.first
+    }
+
+    private static func ultraWideDevice() -> AVCaptureDevice? {
+        AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInUltraWideCamera],
+            mediaType: .video,
+            position: .back
         ).devices.first
     }
 }

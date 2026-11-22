@@ -488,7 +488,7 @@ final class CameraViewModel: ObservableObject {
 
     var zoomRange: ClosedRange<CGFloat> {
         let range = activeCamera.zoomRange
-        let low = max(range.lowerBound, 0.5)
+        let low = max(range.lowerBound, isRecording ? 1 : 0.5)
         return low...max(range.upperBound, low)
     }
 
@@ -536,6 +536,14 @@ final class CameraViewModel: ObservableObject {
         let range = zoomRange
         let clamped = min(max(factor, range.lowerBound), range.upperBound)
         guard abs(clamped - zoomFactor) > 0.005 else { return }
+
+        // 超广角镜头只有 12MP，48MP 档自动退回标准。
+        if clamped < 0.95, photoResolution == .high {
+            photoResolution = .standard
+            activeCamera.setPhotoResolution(.standard)
+            showToast("超广角最高 12MP，已切回标准")
+        }
+
         zoomFactor = clamped
         activeCamera.setZoomFactor(clamped)
     }
