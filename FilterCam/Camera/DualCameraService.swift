@@ -430,18 +430,24 @@ final class DualCameraService: NSObject, CameraServicing {
                 let duration = rawDuration.isValid ? rawDuration : .zero
                 let size = self.writerSize
                 writer.finishWriting {
-                    if writer.status == .completed {
-                        continuation.resume(returning: RecordedVideo(
-                            url: url,
-                            duration: duration,
-                            pixelWidth: Int(abs(size.width)),
-                            pixelHeight: Int(abs(size.height)),
-                            frontURL: nil
-                        ))
-                        self.writerQueue.async { self.resetWriter(deleteFile: false) }
-                    } else {
-                        continuation.resume(throwing: writer.error ?? CameraError.captureFailed("视频写入失败"))
-                        self.writerQueue.async { self.resetWriter(deleteFile: true) }
+                    let completed = writer.status == .completed
+                    let error = writer.error
+                    self.writerQueue.async {
+                        if completed {
+                            self.resetWriter(deleteFile: false)
+                            continuation.resume(returning: RecordedVideo(
+                                url: url,
+                                duration: duration,
+                                pixelWidth: Int(abs(size.width)),
+                                pixelHeight: Int(abs(size.height)),
+                                frontURL: nil
+                            ))
+                        } else {
+                            self.resetWriter(deleteFile: true)
+                            continuation.resume(
+                                throwing: error ?? CameraError.captureFailed("视频写入失败")
+                            )
+                        }
                     }
                 }
             }
