@@ -18,6 +18,7 @@ files = [
     "FilterCam/UI/CrashReportView.swift",
     "FilterCam/App/RootView.swift",
     "FilterCam/App/FilterCamApp.swift",
+    "FilterCam/UI/ZoomDial.swift",
 ]
 
 for f in files:

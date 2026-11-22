@@ -6,6 +6,8 @@ struct CameraScreen: View {
     @StateObject private var viewModel: CameraViewModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var pinchStartZoom: CGFloat?
+    @State private var isZoomDialVisible = false
+    @State private var zoomDialTask: Task<Void, Never>?
 
     init() {
         _viewModel = StateObject(
@@ -51,14 +53,34 @@ struct CameraScreen: View {
                     onManualFocus: { viewModel.toggleManualFocus() },
                     onResolution: { viewModel.togglePhotoResolution() },
                     onLivePhoto: { viewModel.toggleLivePhoto() },
-                    onDual: { viewModel.toggleDualCamera() },
-                    onFlip: { viewModel.flipCamera() }
+                    onDual: { hideZoomDial(); viewModel.toggleDualCamera() },
+                    onFlip: { hideZoomDial(); viewModel.flipCamera() }
                 )
                 .padding(.top, 8)
 
                 Spacer()
 
                 bottomControls
+                    .overlay(alignment: .top) {
+                        if isZoomDialVisible {
+                            ZoomDial(
+                                value: viewModel.zoomFactor,
+                                range: viewModel.zoomRange,
+                                stops: [0.5, 1, 2, 3, 5, 10],
+                                onChange: { value in
+                                    zoomDialTask?.cancel()
+                                    viewModel.setZoom(value)
+                                },
+                                onInteractionEnded: {
+                                    scheduleZoomDialHide(after: 1.4)
+                                }
+                            )
+                            .frame(height: 118)
+                            .padding(.horizontal, 18)
+                            .offset(y: -126)
+                            .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .bottom)))
+                        }
+                    }
             }
 
             overlay
@@ -130,7 +152,10 @@ struct CameraScreen: View {
             }
         }
         .onAppear { viewModel.onAppear() }
-        .onDisappear { viewModel.onDisappear() }
+        .onDisappear {
+            zoomDialTask?.cancel()
+            viewModel.onDisappear()
+        }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
@@ -211,23 +236,26 @@ struct CameraScreen: View {
         )
     }
 
-    /// 变焦倍数：双指缩放后显示，点一下回到 1×。
+    /// 变焦倍数：点一下回到 1×，长按打开弧形变焦盘。
     private var zoomPill: some View {
         let isZoomed = abs(viewModel.zoomFactor - 1) > 0.01
-        return Button {
-            viewModel.resetZoom()
-        } label: {
-            Text(String(format: "%.1f×", viewModel.zoomFactor))
-                .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                .foregroundStyle(Theme.control)
-                .padding(.horizontal, 10)
-                .frame(height: 26)
-                .background(Theme.overlay, in: Capsule())
-        }
-        .buttonStyle(.plain)
-        .opacity(isZoomed ? 1 : 0)
-        .disabled(!isZoomed)
-        .padding(.top, 2)
+        return Text(String(format: "%.1f×", viewModel.zoomFactor))
+            .font(.system(size: 12, weight: .semibold).monospacedDigit())
+            .foregroundStyle(isZoomed ? Color.yellow : Theme.control)
+            .padding(.horizontal, 10)
+            .frame(height: 26)
+            .background(Theme.overlay, in: Capsule())
+            .contentShape(Capsule())
+            .onTapGesture {
+                viewModel.resetZoom()
+            }
+            .onLongPressGesture(minimumDuration: 0.25) {
+                Haptics.selection()
+                showZoomDial()
+            }
+            .padding(.top, 2)
+            .accessibilityLabel("变焦倍数")
+            .accessibilityHint("轻点回到 1 倍，长按打开变焦盘")
     }
 
     /// 右下角：水印设置入口。
@@ -334,6 +362,38 @@ struct CameraScreen: View {
         UIApplication.shared.open(url)
     }
 
+    // MARK: - 变焦盘
+
+    private func showZoomDial() {
+        let range = viewModel.zoomRange
+        guard range.upperBound > range.lowerBound + 0.01 else { return }
+
+        zoomDialTask?.cancel()
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+            isZoomDialVisible = true
+        }
+        scheduleZoomDialHide(after: 2.2)
+    }
+
+    private func scheduleZoomDialHide(after seconds: Double) {
+        zoomDialTask?.cancel()
+        zoomDialTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.18)) {
+                isZoomDialVisible = false
+            }
+        }
+    }
+
+    private func hideZoomDial() {
+        zoomDialTask?.cancel()
+        guard isZoomDialVisible else { return }
+        withAnimation(.easeOut(duration: 0.16)) {
+            isZoomDialVisible = false
+        }
+    }
+
     /// 覆盖全屏的透明层：点按对焦，并显示对焦框。
     private var focusLayer: some View {
         GeometryReader { geo in
@@ -360,9 +420,15 @@ struct CameraScreen: View {
                             pinchStartZoom = viewModel.zoomFactor
                         }
                         viewModel.setZoom((pinchStartZoom ?? 1) * value.magnification)
+                        if isZoomDialVisible {
+                            zoomDialTask?.cancel()
+                        } else {
+                            showZoomDial()
+                        }
                     }
                     .onEnded { _ in
                         pinchStartZoom = nil
+                        scheduleZoomDialHide(after: 1.2)
                     }
             )
         }
