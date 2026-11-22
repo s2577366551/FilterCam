@@ -76,9 +76,11 @@ struct ZoomDial: View {
     // MARK: - 绘制
 
     private func panel(center: CGPoint, radius: CGFloat, size: CGSize) -> some View {
-        Path { path in
+        let start = point(center: center, radius: radius, degrees: startDegrees)
+        return Path { path in
             path.move(to: CGPoint(x: 0, y: size.height))
-            path.addLine(to: CGPoint(x: 0, y: center.y))
+            path.addLine(to: CGPoint(x: 0, y: start.y))
+            path.addLine(to: start)
             path.addArc(
                 center: center,
                 radius: radius,
