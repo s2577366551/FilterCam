@@ -134,14 +134,17 @@ final class CameraViewModel: ObservableObject {
     }
 
     func toggleLivePhoto() {
-        guard camera.isLivePhotoCaptureSupported else {
-            showToast("这台设备不支持实况照片")
-            return
+        let wantOn = !isLivePhotoEnabled
+        Task {
+            let enabled = await camera.setLivePhotoEnabled(wantOn)
+            isLivePhotoEnabled = enabled
+            if wantOn {
+                showToast(enabled ? "实况照片已开启" : "这台设备不支持实况照片")
+            } else {
+                showToast("实况照片已关闭")
+            }
+            Haptics.selection()
         }
-        isLivePhotoEnabled.toggle()
-        camera.setLivePhotoEnabled(isLivePhotoEnabled)
-        showToast(isLivePhotoEnabled ? "实况照片已开启" : "实况照片已关闭")
-        Haptics.selection()
     }
 
     func flipCamera() {

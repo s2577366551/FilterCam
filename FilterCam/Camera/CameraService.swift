@@ -78,12 +78,58 @@ final class CameraService: NSObject, CameraServicing {
         photoOutput.isLivePhotoCaptureSupported
     }
 
-    func setLivePhotoEnabled(_ enabled: Bool) {
-        sessionQueue.async {
-            let supported = self.photoOutput.isLivePhotoCaptureSupported
-            self.livePhotoEnabled = enabled && supported
-            self.photoOutput.isLivePhotoCaptureEnabled = self.livePhotoEnabled
+    /// 开启/关闭实况。返回最终是否真的启用成功。
+    /// 实况最高只支持 1200 万像素，所以开启时要把拍照上限调回标准档。
+    func setLivePhotoEnabled(_ enabled: Bool) async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            sessionQueue.async {
+                continuation.resume(returning: self.applyLivePhotoEnabled(enabled))
+            }
         }
+    }
+
+    private func applyLivePhotoEnabled(_ enabled: Bool) -> Bool {
+        guard let device = videoInput?.device else { return false }
+
+        if !enabled {
+            session.beginConfiguration()
+            if let format = Self.bestPhotoFormat(for: device) {
+                Self.applyFormat(format, to: device)
+            }
+            if let largest = Self.largestPhotoDimensions(for: device.activeFormat) {
+                photoOutput.maxPhotoDimensions = largest
+            }
+            session.commitConfiguration()
+
+            photoOutput.isLivePhotoCaptureEnabled = false
+            livePhotoEnabled = false
+            return false
+        }
+
+        // 先把拍照上限降到 12MP 档，再检查是否支持。
+        session.beginConfiguration()
+        if let standard = Self.standardPhotoDimensions(for: device.activeFormat) {
+            photoOutput.maxPhotoDimensions = standard
+        }
+        session.commitConfiguration()
+
+        var supported = photoOutput.isLivePhotoCaptureSupported
+
+        if !supported {
+            // 兜底：退回系统 .photo 预设（苹果保证支持实况的配置）再试一次。
+            session.beginConfiguration()
+            session.sessionPreset = .photo
+            session.commitConfiguration()
+            supported = photoOutput.isLivePhotoCaptureSupported
+            if let current = videoInput?.device,
+               let largest = Self.largestPhotoDimensions(for: current.activeFormat) {
+                Log.camera.info("实况模式拍照上限: \(largest.width)x\(largest.height)")
+            }
+        }
+
+        photoOutput.isLivePhotoCaptureEnabled = supported
+        livePhotoEnabled = supported
+        return supported
     }
 
     func capturePhoto() async throws -> CapturedPhoto {
@@ -341,6 +387,10 @@ final class CameraService: NSObject, CameraServicing {
             Self.applyFormat(format, to: device)
         }
         Self.applyMaxPhotoDimensions(to: photoOutput, device: device)
+        // 实况模式下拍照上限必须保持在 12MP 档。
+        if livePhotoEnabled, let standard = Self.standardPhotoDimensions(for: device.activeFormat) {
+            photoOutput.maxPhotoDimensions = standard
+        }
         // 换摄像头后回到连续自动对焦，避免沿用上一颗镜头的锁定状态。
         if (try? device.lockForConfiguration()) != nil {
             if device.isFocusModeSupported(.continuousAutoFocus) {
@@ -399,14 +449,31 @@ final class CameraService: NSObject, CameraServicing {
         to output: AVCapturePhotoOutput,
         device: AVCaptureDevice
     ) {
-        let largest = device.activeFormat.supportedMaxPhotoDimensions.max { lhs, rhs in
-            Int(lhs.width) * Int(lhs.height) < Int(rhs.width) * Int(rhs.height)
-        }
-        guard let largest, largest.width > 0, largest.height > 0 else { return }
+        guard let largest = largestPhotoDimensions(for: device.activeFormat),
+              largest.width > 0, largest.height > 0 else { return }
         output.maxPhotoDimensions = largest
         Log.camera.info(
             "拍照尺寸: \(largest.width)x\(largest.height)"
         )
+    }
+
+    private static func largestPhotoDimensions(
+        for format: AVCaptureDevice.Format
+    ) -> CMVideoDimensions? {
+        format.supportedMaxPhotoDimensions.max { lhs, rhs in
+            Int(lhs.width) * Int(lhs.height) < Int(rhs.width) * Int(rhs.height)
+        }
+    }
+
+    /// 不超过 1200 万像素的最大档（实况照片的上限）。
+    private static func standardPhotoDimensions(
+        for format: AVCaptureDevice.Format
+    ) -> CMVideoDimensions? {
+        let limit = 12_000_000
+        let sorted = format.supportedMaxPhotoDimensions.sorted {
+            Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height)
+        }
+        return sorted.last { Int($0.width) * Int($0.height) <= limit } ?? sorted.first
     }
 
     private func applyConnectionSettings(position: AVCaptureDevice.Position) {

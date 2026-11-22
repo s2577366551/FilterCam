@@ -77,7 +77,8 @@ protocol CameraServicing: AnyObject {
     func setFlashMode(_ mode: FlashMode)
     func setPhotoResolution(_ resolution: PhotoResolution)
     var isLivePhotoCaptureSupported: Bool { get }
-    func setLivePhotoEnabled(_ enabled: Bool)
+    /// 开启/关闭实况，返回最终是否启用成功。
+    func setLivePhotoEnabled(_ enabled: Bool) async -> Bool
     func capturePhoto() async throws -> CapturedPhoto
 
     /// 在指定设备坐标点自动对焦并自动曝光（坐标范围 0...1）。
