@@ -15,15 +15,7 @@ enum CrashLogger {
     }()
 
     static func install() {
-        NSSetUncaughtExceptionHandler { exception in
-            let text = """
-            \(Date())
-            name: \(exception.name.rawValue)
-            reason: \(exception.reason ?? "")
-            \(exception.callStackSymbols.joined(separator: "\n"))
-            """
-            write(text, to: crashFileName)
-        }
+        NSSetUncaughtExceptionHandler(crashExceptionHandler)
 
         // 信号处理器只能使用最基础的 C 接口，路径提前转成 C 字符串。
         let path = documents.appendingPathComponent(crashFileName).path
@@ -31,6 +23,16 @@ enum CrashLogger {
         for sig in [SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP] {
             signal(sig, crashSignalHandler)
         }
+    }
+
+    static func recordException(_ exception: NSException) {
+        let text = """
+        \(Date())
+        name: \(exception.name.rawValue)
+        reason: \(exception.reason ?? "")
+        \(exception.callStackSymbols.joined(separator: "\n"))
+        """
+        write(text, to: crashFileName)
     }
 
     static func breadcrumb(_ message: String) {
@@ -122,8 +124,12 @@ enum CrashLogger {
     }
 }
 
-/// 全局 C 函数，信号处理器里不能捕获上下文。
+/// 全局 C 函数，信号处理器和异常处理器里不能捕获上下文。
 private var crashLogPath: UnsafeMutablePointer<CChar>?
+
+private func crashExceptionHandler(_ exception: NSException) {
+    CrashLogger.recordException(exception)
+}
 
 private func crashSignalHandler(_ sig: Int32) {
     guard let path = crashLogPath else {
