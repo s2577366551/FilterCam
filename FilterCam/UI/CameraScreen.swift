@@ -219,7 +219,7 @@ struct CameraScreen: View {
         case .permissionDenied:
             PermissionGateView(
                 title: "需要相机权限",
-                message: "FilterCam 需要访问相机才能拍摄照片。请在系统设置中允许相机访问。",
+                message: "Sx Cam 需要访问相机才能拍摄照片。请在系统设置中允许相机访问。",
                 showsSettingsButton: true,
                 retry: { viewModel.retry() }
             )

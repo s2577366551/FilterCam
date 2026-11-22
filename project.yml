@@ -25,7 +25,7 @@ targets:
     info:
       path: Support/Info.plist
       properties:
-        CFBundleDisplayName: FilterCam
+        CFBundleDisplayName: Sx Cam
         NSHumanReadableCopyright: "© 2026 Sx"
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
