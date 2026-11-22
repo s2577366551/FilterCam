@@ -161,8 +161,9 @@ struct ZoomDial: View {
     private func angleDegrees(from point: CGPoint, center: CGPoint) -> Double {
         let dx = Double(point.x - center.x)
         let dy = Double(point.y - center.y)
+        // 归一化到 0…360，和 startDegrees / sweepDegrees 保持同一坐标系。
         var degrees = atan2(dy, dx) * 180 / .pi
-        if degrees > 0 { degrees -= 360 }
+        if degrees < 0 { degrees += 360 }
         return degrees
     }
 

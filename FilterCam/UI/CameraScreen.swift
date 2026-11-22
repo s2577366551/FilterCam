@@ -242,24 +242,15 @@ struct CameraScreen: View {
     private var zoomPill: some View {
         HStack(spacing: 0) {
             ForEach(viewModel.zoomPillStops) { stop in
-                let isActive = nearestStopValue == stop.value
-                Text(pillLabel(for: stop, isActive: isActive))
-                    .font(.system(size: Theme.Font.caption, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(isActive ? Color.yellow : Theme.control)
-                    .frame(width: 44, height: 30)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        LongPressGesture(minimumDuration: 0.28)
-                            .onEnded { _ in
-                                showZoomDial()
-                            }
-                            .exclusively(
-                                before: TapGesture().onEnded {
-                                    viewModel.setZoom(stop.value)
-                                    Haptics.selection()
-                                }
-                            )
-                    )
+                ZoomPillStopButton(
+                    label: pillLabel(for: stop, isActive: nearestStopValue == stop.value),
+                    isActive: nearestStopValue == stop.value,
+                    onTap: {
+                        viewModel.setZoom(stop.value)
+                        Haptics.selection()
+                    },
+                    onLongPress: { showZoomDial() }
+                )
             }
         }
         .padding(.horizontal, 6)
@@ -562,5 +553,41 @@ struct CameraScreen: View {
         case .initializing, .running:
             EmptyView()
         }
+    }
+}
+
+/// 档位胶囊里的单个数字：短按切换，按住 0.3 秒打开弧形盘。
+/// 用 DragGesture 自己计时，避免 LongPress + Tap 组合把点击吞掉。
+private struct ZoomPillStopButton: View {
+    let label: String
+    let isActive: Bool
+    let onTap: () -> Void
+    let onLongPress: () -> Void
+
+    @State private var pressedAt: Date?
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: Theme.Font.caption, weight: .semibold).monospacedDigit())
+            .foregroundStyle(isActive ? Color.yellow : Theme.control)
+            .frame(width: 44, height: 30)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        if pressedAt == nil { pressedAt = Date() }
+                    }
+                    .onEnded { _ in
+                        let held = Date().timeIntervalSince(pressedAt ?? Date())
+                        pressedAt = nil
+                        if held >= 0.3 {
+                            onLongPress()
+                        } else {
+                            onTap()
+                        }
+                    }
+            )
+            .accessibilityLabel(label)
+            .accessibilityAddTraits(.isButton)
     }
 }

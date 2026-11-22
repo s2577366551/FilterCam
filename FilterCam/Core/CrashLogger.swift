@@ -94,7 +94,11 @@ enum CrashLogger {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         guard lines.count > 1 else { return false }
-        return lines.last?.hasSuffix("clean exit") != true
+
+        // 退到后台时先写 clean exit，随后 onDisappear 还会写相机停止的步骤，
+        // 所以不能只看最后一行：只要本次启动之后出现过 clean exit 就算正常退出。
+        let launchIndex = lines.lastIndex { $0.hasSuffix("app launch") } ?? 0
+        return !lines[launchIndex...].contains { $0.hasSuffix("clean exit") }
     }
 
     private static var documents: URL {
