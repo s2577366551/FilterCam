@@ -114,22 +114,24 @@ enum DeviceModel {
     ]
 }
 
-/// 生成水印图层：白字 + 轻阴影，放在画面右下角。
+/// 生成水印图层：SF Pro（iOS 系统字体）+ 轻阴影，放在画面右下角。
 enum WatermarkRenderer {
     static func overlay(text: String, frame: CGRect) -> CIImage? {
         guard !text.isEmpty, frame.width > 0, frame.height > 0 else { return nil }
 
         let base = min(frame.width, frame.height)
-        let fontSize = max(base * 0.034, 12)
-        let margin = base * 0.042
+        let fontSize = max(base * 0.032, 12)
+        let margin = base * 0.040
+        // 苹果官方用的是 San Francisco（SF Pro），也就是 iOS 系统字体。
+        // 大字号用系统字体的 Display 光学尺寸，字距按苹果默认（略微收紧）。
         let attributes: [NSAttributedString.Key: Any] = [
             .font: UIFont.systemFont(ofSize: fontSize, weight: .semibold),
-            .foregroundColor: UIColor.white.withAlphaComponent(0.94),
-            .kern: fontSize * 0.045
+            .foregroundColor: UIColor.white.withAlphaComponent(0.96),
+            .kern: -fontSize * 0.008
         ]
         let string = NSAttributedString(string: text, attributes: attributes)
         let textSize = string.size()
-        let padding = fontSize * 0.55
+        let padding = fontSize * 0.5
         let canvas = CGSize(
             width: ceil(textSize.width + padding * 2),
             height: ceil(textSize.height + padding * 2)
@@ -142,9 +144,9 @@ enum WatermarkRenderer {
         let image = renderer.image { context in
             let cg = context.cgContext
             cg.setShadow(
-                offset: CGSize(width: 0, height: fontSize * 0.05),
-                blur: fontSize * 0.20,
-                color: UIColor.black.withAlphaComponent(0.55).cgColor
+                offset: CGSize(width: 0, height: fontSize * 0.03),
+                blur: fontSize * 0.10,
+                color: UIColor.black.withAlphaComponent(0.40).cgColor
             )
             string.draw(at: CGPoint(x: padding, y: padding))
         }
