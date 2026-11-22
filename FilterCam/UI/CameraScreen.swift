@@ -56,61 +56,7 @@ struct CameraScreen: View {
 
                 Spacer()
 
-                if viewModel.selectedPreset.id != FilterPreset.original.id {
-                    AdjustmentPanel(
-                        adjustments: viewModel.adjustments,
-                        onChange: { viewModel.setAdjustments($0) },
-                        onReset: { viewModel.resetAdjustments() }
-                    )
-                    .padding(.bottom, 4)
-
-                    IntensitySlider(
-                        value: viewModel.intensity,
-                        onChange: { viewModel.setIntensity($0) }
-                    )
-                    .padding(.bottom, 8)
-                }
-
-                if viewModel.isManualFocusEnabled {
-                    ManualFocusSlider(
-                        value: viewModel.manualFocus,
-                        onChange: { viewModel.setManualFocus($0) }
-                    )
-                    .padding(.bottom, 8)
-                }
-
-                FilterStrip(
-                    presets: viewModel.stripPresets,
-                    thumbnails: viewModel.thumbnails,
-                    selectedID: viewModel.selectedPreset.id,
-                    onSelect: { viewModel.selectPreset($0) },
-                    onOpenLibrary: { viewModel.isLibraryPresented = true }
-                )
-                .padding(.bottom, 4)
-
-                HStack(alignment: .center) {
-                    lastPhotoButton
-                    Spacer()
-                    ShutterButton(
-                        isBusy: viewModel.isShutterBusy,
-                        isVideoMode: viewModel.captureMode == .video,
-                        isRecording: viewModel.isRecording
-                    ) {
-                        if viewModel.captureMode == .video {
-                            viewModel.toggleRecording()
-                        } else {
-                            viewModel.capture()
-                        }
-                    }
-                    Spacer()
-                    Color.clear
-                        .frame(width: 50, height: 50)
-                }
-                .padding(.horizontal, 24)
-
-                modePicker
-                    .padding(.top, 4)
-                    .padding(.bottom, 6)
+                bottomControls
             }
 
             overlay
@@ -195,19 +141,87 @@ struct CameraScreen: View {
         }
     }
 
+    /// 底部控制区：整块吃掉点击，避免控件之间的空隙穿透到全屏对焦层。
+    private var bottomControls: some View {
+        VStack(spacing: 0) {
+            if viewModel.selectedPreset.id != FilterPreset.original.id {
+                AdjustmentPanel(
+                    adjustments: viewModel.adjustments,
+                    onChange: { viewModel.setAdjustments($0) },
+                    onReset: { viewModel.resetAdjustments() }
+                )
+                .padding(.bottom, 4)
+
+                IntensitySlider(
+                    value: viewModel.intensity,
+                    onChange: { viewModel.setIntensity($0) }
+                )
+                .padding(.bottom, 8)
+            }
+
+            if viewModel.isManualFocusEnabled {
+                ManualFocusSlider(
+                    value: viewModel.manualFocus,
+                    onChange: { viewModel.setManualFocus($0) }
+                )
+                .padding(.bottom, 8)
+            }
+
+            FilterStrip(
+                presets: viewModel.stripPresets,
+                thumbnails: viewModel.thumbnails,
+                selectedID: viewModel.selectedPreset.id,
+                onSelect: { viewModel.selectPreset($0) },
+                onOpenLibrary: { viewModel.isLibraryPresented = true }
+            )
+            .padding(.bottom, 4)
+
+            HStack(alignment: .center) {
+                lastPhotoButton
+                Spacer()
+                ShutterButton(
+                    isBusy: viewModel.isShutterBusy,
+                    isVideoMode: viewModel.captureMode == .video,
+                    isRecording: viewModel.isRecording
+                ) {
+                    if viewModel.captureMode == .video {
+                        viewModel.toggleRecording()
+                    } else {
+                        viewModel.capture()
+                    }
+                }
+                Spacer()
+                Color.clear
+                    .frame(width: 50, height: 50)
+            }
+            .padding(.horizontal, 24)
+
+            modePicker
+                .padding(.top, 4)
+        }
+        .padding(.bottom, 6)
+        .background(
+            Rectangle()
+                .fill(Color.black.opacity(0.001))
+                .contentShape(Rectangle())
+                .onTapGesture { }
+        )
+    }
+
     /// 照片 / 视频模式切换（苹果相机那种文字切换）。
     private var modePicker: some View {
-        HStack(spacing: 26) {
+        HStack(spacing: 8) {
             ForEach(CaptureMode.allCases) { mode in
                 Button {
                     viewModel.selectCaptureMode(mode)
                 } label: {
                     Text(mode.displayName)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(
                             viewModel.captureMode == mode ? Color.yellow : Theme.controlDim
                         )
-                        .frame(minWidth: 44, minHeight: 28)
+                        .frame(width: 68, height: 36)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(viewModel.isRecording)
