@@ -1,0 +1,426 @@
+[
+  {
+    "id": "acros",
+    "name": "ACROS",
+    "group": "F-Log2",
+    "camera": "",
+    "sim": "ACROS",
+    "file": "official_acros.rgba"
+  },
+  {
+    "id": "astia",
+    "name": "ASTIA",
+    "group": "F-Log2",
+    "camera": "",
+    "sim": "ASTIA",
+    "file": "official_astia.rgba"
+  },
+  {
+    "id": "classic_chrome",
+    "name": "CLASSIC CHROME",
+    "group": "F-Log2",
+    "camera": "",
+    "sim": "CLASSIC CHROME",
+    "file": "official_classic_chrome.rgba"
+  },
+  {
+    "id": "classic_neg",
+    "name": "CLASSIC Neg",
+    "group": "F-Log2",
+    "camera": "",
+    "sim": "CLASSIC Neg",
+    "file": "official_classic_neg.rgba"
+  },
+  {
+    "id": "eterna",
+    "name": "ETERNA",
+    "group": "F-Log2",
+    "camera": "",
+    "sim": "ETERNA",
+    "file": "official_eterna.rgba"
+  },
+  {
+    "id": "eterna_bb",
+    "name": "ETERNA BB",
+    "group": "F-Log2",
+    "camera": "",
+    "sim": "ETERNA BB",
+    "file": "official_eterna_bb.rgba"
+  },
+  {
+    "id": "eterna_bb_gfx100_ii",
+    "name": "ETERNA BB · GFX100 II",
+    "group": "F-Log2",
+    "camera": "GFX100 II",
+    "sim": "ETERNA BB",
+    "file": "official_eterna_bb_gfx100_ii.rgba"
+  },
+  {
+    "id": "eterna_bb_x_e5",
+    "name": "ETERNA BB · X-E5",
+    "group": "F-Log2",
+    "camera": "X-E5",
+    "sim": "ETERNA BB",
+    "file": "official_eterna_bb_x_e5.rgba"
+  },
+  {
+    "id": "eterna_bb_x_h2s",
+    "name": "ETERNA BB · X-H2S",
+    "group": "F-Log2",
+    "camera": "X-H2S",
+    "sim": "ETERNA BB",
+    "file": "official_eterna_bb_x_h2s.rgba"
+  },
+  {
+    "id": "eterna_gfx100_ii",
+    "name": "ETERNA · GFX100 II",
+    "group": "F-Log2",
+    "camera": "GFX100 II",
+    "sim": "ETERNA",
+    "file": "official_eterna_gfx100_ii.rgba"
+  },
+  {
+    "id": "eterna_x_e5",
+    "name": "ETERNA · X-E5",
+    "group": "F-Log2",
+    "camera": "X-E5",
+    "sim": "ETERNA",
+    "file": "official_eterna_x_e5.rgba"
+  },
+  {
+    "id": "eterna_x_h2s",
+    "name": "ETERNA · X-H2S",
+    "group": "F-Log2",
+    "camera": "X-H2S",
+    "sim": "ETERNA",
+    "file": "official_eterna_x_h2s.rgba"
+  },
+  {
+    "id": "f_log2_709",
+    "name": "F-Log2 709",
+    "group": "F-Log2",
+    "camera": "",
+    "sim": "F-Log2 709",
+    "file": "official_f_log2_709.rgba"
+  },
+  {
+    "id": "pro_neg_std",
+    "name": "PRO Neg Std",
+    "group": "F-Log2",
+    "camera": "",
+    "sim": "PRO Neg Std",
+    "file": "official_pro_neg_std.rgba"
+  },
+  {
+    "id": "provia",
+    "name": "PROVIA",
+    "group": "F-Log2",
+    "camera": "",
+    "sim": "PROVIA",
+    "file": "official_provia.rgba"
+  },
+  {
+    "id": "reala_ace",
+    "name": "REALA ACE",
+    "group": "F-Log2",
+    "camera": "",
+    "sim": "REALA ACE",
+    "file": "official_reala_ace.rgba"
+  },
+  {
+    "id": "velvia",
+    "name": "Velvia",
+    "group": "F-Log2",
+    "camera": "",
+    "sim": "Velvia",
+    "file": "official_velvia.rgba"
+  },
+  {
+    "id": "wdr_709",
+    "name": "WDR 709",
+    "group": "F-Log2",
+    "camera": "",
+    "sim": "WDR 709",
+    "file": "official_wdr_709.rgba"
+  },
+  {
+    "id": "acros_f_log2c",
+    "name": "ACROS (F-Log2C)",
+    "group": "F-Log2C",
+    "camera": "",
+    "sim": "ACROS",
+    "file": "official_acros_f_log2c.rgba"
+  },
+  {
+    "id": "astia_f_log2c",
+    "name": "ASTIA (F-Log2C)",
+    "group": "F-Log2C",
+    "camera": "",
+    "sim": "ASTIA",
+    "file": "official_astia_f_log2c.rgba"
+  },
+  {
+    "id": "classic_chrome_f_log2c",
+    "name": "CLASSIC CHROME (F-Log2C)",
+    "group": "F-Log2C",
+    "camera": "",
+    "sim": "CLASSIC CHROME",
+    "file": "official_classic_chrome_f_log2c.rgba"
+  },
+  {
+    "id": "classic_neg_f_log2c",
+    "name": "CLASSIC Neg (F-Log2C)",
+    "group": "F-Log2C",
+    "camera": "",
+    "sim": "CLASSIC Neg",
+    "file": "official_classic_neg_f_log2c.rgba"
+  },
+  {
+    "id": "eterna_f_log2c",
+    "name": "ETERNA (F-Log2C)",
+    "group": "F-Log2C",
+    "camera": "",
+    "sim": "ETERNA",
+    "file": "official_eterna_f_log2c.rgba"
+  },
+  {
+    "id": "eterna_f_log2c_gfx100_ii",
+    "name": "ETERNA (F-Log2C) · GFX100 II",
+    "group": "F-Log2C",
+    "camera": "GFX100 II",
+    "sim": "ETERNA",
+    "file": "official_eterna_f_log2c_gfx100_ii.rgba"
+  },
+  {
+    "id": "eterna_f_log2c_x_h2",
+    "name": "ETERNA (F-Log2C) · X-H2",
+    "group": "F-Log2C",
+    "camera": "X-H2",
+    "sim": "ETERNA",
+    "file": "official_eterna_f_log2c_x_h2.rgba"
+  },
+  {
+    "id": "eterna_f_log2c_x_h2s",
+    "name": "ETERNA (F-Log2C) · X-H2S",
+    "group": "F-Log2C",
+    "camera": "X-H2S",
+    "sim": "ETERNA",
+    "file": "official_eterna_f_log2c_x_h2s.rgba"
+  },
+  {
+    "id": "eterna_bb_f_log2c",
+    "name": "ETERNA BB (F-Log2C)",
+    "group": "F-Log2C",
+    "camera": "",
+    "sim": "ETERNA BB",
+    "file": "official_eterna_bb_f_log2c.rgba"
+  },
+  {
+    "id": "eterna_bb_f_log2c_gfx100_ii",
+    "name": "ETERNA BB (F-Log2C) · GFX100 II",
+    "group": "F-Log2C",
+    "camera": "GFX100 II",
+    "sim": "ETERNA BB",
+    "file": "official_eterna_bb_f_log2c_gfx100_ii.rgba"
+  },
+  {
+    "id": "eterna_bb_f_log2c_x_h2",
+    "name": "ETERNA BB (F-Log2C) · X-H2",
+    "group": "F-Log2C",
+    "camera": "X-H2",
+    "sim": "ETERNA BB",
+    "file": "official_eterna_bb_f_log2c_x_h2.rgba"
+  },
+  {
+    "id": "eterna_bb_f_log2c_x_h2s",
+    "name": "ETERNA BB (F-Log2C) · X-H2S",
+    "group": "F-Log2C",
+    "camera": "X-H2S",
+    "sim": "ETERNA BB",
+    "file": "official_eterna_bb_f_log2c_x_h2s.rgba"
+  },
+  {
+    "id": "f_log2c_709_f_log2c",
+    "name": "F-Log2C 709 (F-Log2C)",
+    "group": "F-Log2C",
+    "camera": "",
+    "sim": "F-Log2C 709",
+    "file": "official_f_log2c_709_f_log2c.rgba"
+  },
+  {
+    "id": "pro_neg_std_f_log2c",
+    "name": "PRO Neg Std (F-Log2C)",
+    "group": "F-Log2C",
+    "camera": "",
+    "sim": "PRO Neg Std",
+    "file": "official_pro_neg_std_f_log2c.rgba"
+  },
+  {
+    "id": "provia_f_log2c",
+    "name": "PROVIA (F-Log2C)",
+    "group": "F-Log2C",
+    "camera": "",
+    "sim": "PROVIA",
+    "file": "official_provia_f_log2c.rgba"
+  },
+  {
+    "id": "reala_ace_f_log2c",
+    "name": "REALA ACE (F-Log2C)",
+    "group": "F-Log2C",
+    "camera": "",
+    "sim": "REALA ACE",
+    "file": "official_reala_ace_f_log2c.rgba"
+  },
+  {
+    "id": "velvia_f_log2c",
+    "name": "Velvia (F-Log2C)",
+    "group": "F-Log2C",
+    "camera": "",
+    "sim": "Velvia",
+    "file": "official_velvia_f_log2c.rgba"
+  },
+  {
+    "id": "wdr_709_f_log2c",
+    "name": "WDR 709 (F-Log2C)",
+    "group": "F-Log2C",
+    "camera": "",
+    "sim": "WDR 709",
+    "file": "official_wdr_709_f_log2c.rgba"
+  },
+  {
+    "id": "wdr_709_f_log2c_gfx100_ii",
+    "name": "WDR 709 (F-Log2C) · GFX100 II",
+    "group": "F-Log2C",
+    "camera": "GFX100 II",
+    "sim": "WDR 709",
+    "file": "official_wdr_709_f_log2c_gfx100_ii.rgba"
+  },
+  {
+    "id": "eterna_f_log",
+    "name": "ETERNA (F-Log)",
+    "group": "F-Log",
+    "camera": "",
+    "sim": "ETERNA",
+    "file": "official_eterna_f_log.rgba"
+  },
+  {
+    "id": "eterna_f_log_gfx100",
+    "name": "ETERNA (F-Log) · GFX100",
+    "group": "F-Log",
+    "camera": "GFX100",
+    "sim": "ETERNA",
+    "file": "official_eterna_f_log_gfx100.rgba"
+  },
+  {
+    "id": "eterna_f_log_gfx100_ii",
+    "name": "ETERNA (F-Log) · GFX100 II",
+    "group": "F-Log",
+    "camera": "GFX100 II",
+    "sim": "ETERNA",
+    "file": "official_eterna_f_log_gfx100_ii.rgba"
+  },
+  {
+    "id": "eterna_f_log_x_e5",
+    "name": "ETERNA (F-Log) · X-E5",
+    "group": "F-Log",
+    "camera": "X-E5",
+    "sim": "ETERNA",
+    "file": "official_eterna_f_log_x_e5.rgba"
+  },
+  {
+    "id": "eterna_f_log_x_h1",
+    "name": "ETERNA (F-Log) · X-H1",
+    "group": "F-Log",
+    "camera": "X-H1",
+    "sim": "ETERNA",
+    "file": "official_eterna_f_log_x_h1.rgba"
+  },
+  {
+    "id": "eterna_f_log_x_h2s",
+    "name": "ETERNA (F-Log) · X-H2S",
+    "group": "F-Log",
+    "camera": "X-H2S",
+    "sim": "ETERNA",
+    "file": "official_eterna_f_log_x_h2s.rgba"
+  },
+  {
+    "id": "eterna_bb_f_log",
+    "name": "ETERNA BB (F-Log)",
+    "group": "F-Log",
+    "camera": "",
+    "sim": "ETERNA BB",
+    "file": "official_eterna_bb_f_log.rgba"
+  },
+  {
+    "id": "eterna_bb_f_log_gfx100",
+    "name": "ETERNA BB (F-Log) · GFX100",
+    "group": "F-Log",
+    "camera": "GFX100",
+    "sim": "ETERNA BB",
+    "file": "official_eterna_bb_f_log_gfx100.rgba"
+  },
+  {
+    "id": "eterna_bb_f_log_gfx100_ii",
+    "name": "ETERNA BB (F-Log) · GFX100 II",
+    "group": "F-Log",
+    "camera": "GFX100 II",
+    "sim": "ETERNA BB",
+    "file": "official_eterna_bb_f_log_gfx100_ii.rgba"
+  },
+  {
+    "id": "eterna_bb_f_log_x_e4",
+    "name": "ETERNA BB (F-Log) · X-E4",
+    "group": "F-Log",
+    "camera": "X-E4",
+    "sim": "ETERNA BB",
+    "file": "official_eterna_bb_f_log_x_e4.rgba"
+  },
+  {
+    "id": "eterna_bb_f_log_x_e5",
+    "name": "ETERNA BB (F-Log) · X-E5",
+    "group": "F-Log",
+    "camera": "X-E5",
+    "sim": "ETERNA BB",
+    "file": "official_eterna_bb_f_log_x_e5.rgba"
+  },
+  {
+    "id": "eterna_bb_f_log_x_h2s",
+    "name": "ETERNA BB (F-Log) · X-H2S",
+    "group": "F-Log",
+    "camera": "X-H2S",
+    "sim": "ETERNA BB",
+    "file": "official_eterna_bb_f_log_x_h2s.rgba"
+  },
+  {
+    "id": "f_log_709_f_log",
+    "name": "F-Log 709 (F-Log)",
+    "group": "F-Log",
+    "camera": "",
+    "sim": "F-Log 709",
+    "file": "official_f_log_709_f_log.rgba"
+  },
+  {
+    "id": "f_log_709_f_log_x_h1",
+    "name": "F-Log 709 (F-Log) · X-H1",
+    "group": "F-Log",
+    "camera": "X-H1",
+    "sim": "F-Log 709",
+    "file": "official_f_log_709_f_log_x_h1.rgba"
+  },
+  {
+    "id": "wdr_709_f_log",
+    "name": "WDR 709 (F-Log)",
+    "group": "F-Log",
+    "camera": "",
+    "sim": "WDR 709",
+    "file": "official_wdr_709_f_log.rgba"
+  },
+  {
+    "id": "wdr_709_f_log_x_h1",
+    "name": "WDR 709 (F-Log) · X-H1",
+    "group": "F-Log",
+    "camera": "X-H1",
+    "sim": "WDR 709",
+    "file": "official_wdr_709_f_log_x_h1.rgba"
+  }
+]

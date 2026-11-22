@@ -7,13 +7,22 @@ protocol LUTResolving {
 final class CompositeLUTResolver: LUTResolving {
     private let bundled: LUTLoading
     private let user: UserLUTLibrary
+    private let official: OfficialLUTLibrary
 
-    init(bundled: LUTLoading, user: UserLUTLibrary) {
+    init(
+        bundled: LUTLoading,
+        user: UserLUTLibrary,
+        official: OfficialLUTLibrary = .shared
+    ) {
         self.bundled = bundled
         self.user = user
+        self.official = official
     }
 
     func lut(for preset: FilterPreset) throws -> LUTData? {
+        if let id = preset.officialLUTID {
+            return try official.lut(for: id)
+        }
         if let id = preset.userLUTID {
             return try user.lut(for: id)
         }

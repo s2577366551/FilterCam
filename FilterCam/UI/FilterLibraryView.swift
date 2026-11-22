@@ -109,6 +109,9 @@ struct FilterLibraryView: View {
     }
 
     private var presets: [FilterPreset] {
+        if category == .official {
+            return OfficialLUTLibrary.shared.luts.map { FilterPreset.official($0) }
+        }
         if category == .mine {
             return userLUTs.luts.map { .user($0) }
         }
@@ -123,7 +126,7 @@ struct FilterLibraryView: View {
             Text("还没有导入 LUT")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.control)
-            Text("点左上角「导入」选择 .cube 文件。\n富士官方 LUT 请选 F-Log2 输入。")
+            Text("点左上角「导入」选择 .cube 文件。\n富士官方 LUT 已内置在「富士官方」分类。")
                 .font(.system(size: 12))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.controlDim)
@@ -191,12 +194,21 @@ struct FilterLibraryView: View {
                             .background(Color.black.opacity(0.55), in: Capsule())
                             .padding(5)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    } else if preset.officialLUTID != nil {
+                        Text("官方")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.black.opacity(0.55), in: Capsule())
+                            .padding(5)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     }
                 }
                 .aspectRatio(1, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
 
-                Text(preset.stripName)
+                Text(preset.category == .official ? preset.displayName : preset.stripName)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(selectedID == preset.id ? Theme.control : Theme.controlDim)
                     .lineLimit(1)

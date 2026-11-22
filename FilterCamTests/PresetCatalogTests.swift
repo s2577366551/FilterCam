@@ -22,7 +22,7 @@ final class PresetCatalogTests: XCTestCase {
     }
 
     func testEveryCategoryHasPresets() {
-        for category in FilterCategory.allCases where category != .mine {
+        for category in FilterCategory.allCases where category != .mine && category != .official {
             XCTAssertFalse(PresetCatalog.presets(in: category).isEmpty, "\(category) 为空")
         }
     }

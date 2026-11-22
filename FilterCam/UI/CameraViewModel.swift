@@ -790,6 +790,7 @@ final class CameraViewModel: ObservableObject {
     private func generateThumbnails(from image: CIImage) {
         let presets = PresetCatalog.all
             + userLUTLibrary.currentLUTs().map { FilterPreset.user($0) }
+            + OfficialLUTLibrary.shared.luts.map { FilterPreset.official($0) }
         thumbnailService.generate(from: image, presets: presets) { [weak self] images in
             Task { @MainActor in
                 self?.thumbnails.merge(images) { _, new in new }
@@ -800,6 +801,13 @@ final class CameraViewModel: ObservableObject {
     private func resolvePreset(id: String) -> FilterPreset? {
         if let preset = PresetCatalog.byID[id] {
             return preset
+        }
+        if id.hasPrefix("official_") {
+            let officialID = String(id.dropFirst("official_".count))
+            guard let lut = OfficialLUTLibrary.shared.luts.first(where: { $0.id == officialID }) else {
+                return nil
+            }
+            return .official(lut)
         }
         guard id.hasPrefix("user_") else { return nil }
         let lutID = String(id.dropFirst("user_".count))

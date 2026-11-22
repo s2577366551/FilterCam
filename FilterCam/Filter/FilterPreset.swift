@@ -6,6 +6,7 @@ enum FilterCategory: String, CaseIterable, Identifiable {
     case cinema
     case season
     case experimental
+    case official
     case mine
 
     var id: String { rawValue }
@@ -17,6 +18,7 @@ enum FilterCategory: String, CaseIterable, Identifiable {
         case .cinema: return "电影感"
         case .season: return "季节情绪"
         case .experimental: return "复古实验"
+        case .official: return "富士官方"
         case .mine: return "我的"
         }
     }
@@ -28,6 +30,7 @@ struct FilterPreset: Identifiable, Equatable, Hashable {
     let category: FilterCategory
     let lutName: String?
     let userLUTID: String?
+    let officialLUTID: String?
     let grain: Float
     let vignette: Float
 
@@ -37,6 +40,7 @@ struct FilterPreset: Identifiable, Equatable, Hashable {
         category: FilterCategory,
         lutName: String?,
         userLUTID: String? = nil,
+        officialLUTID: String? = nil,
         grain: Float,
         vignette: Float
     ) {
@@ -45,16 +49,28 @@ struct FilterPreset: Identifiable, Equatable, Hashable {
         self.category = category
         self.lutName = lutName
         self.userLUTID = userLUTID
+        self.officialLUTID = officialLUTID
         self.grain = grain
         self.vignette = vignette
     }
 
     var hasLUT: Bool {
-        lutName != nil || userLUTID != nil
+        lutName != nil || userLUTID != nil || officialLUTID != nil
     }
 
     /// 滤镜条上显示的短名字：去掉富士官方文件名的前后缀，避免把布局撑开。
     var stripName: String {
+        if category == .official {
+            var short = displayName
+            if let range = short.range(of: " · ") {
+                short = String(short[..<range.lowerBound])
+            }
+            if let range = short.range(of: " (") {
+                short = String(short[..<range.lowerBound])
+            }
+            return short
+        }
+
         var name = displayName
 
         // 前缀大小写都可能不同（FLog2 / Flog2 / flog2）。
@@ -101,6 +117,18 @@ struct FilterPreset: Identifiable, Equatable, Hashable {
             category: .mine,
             lutName: nil,
             userLUTID: lut.id,
+            grain: 0,
+            vignette: 0
+        )
+    }
+
+    static func official(_ lut: OfficialLUT) -> FilterPreset {
+        FilterPreset(
+            id: "official_\(lut.id)",
+            displayName: lut.name,
+            category: .official,
+            lutName: nil,
+            officialLUTID: lut.id,
             grain: 0,
             vignette: 0
         )
