@@ -62,8 +62,16 @@ struct CameraScreen: View {
                     .padding(.bottom, 8)
                 }
 
-                ShutterButton(isBusy: viewModel.isSavingPhoto) { viewModel.capture() }
-                    .padding(.bottom, 12)
+                HStack(alignment: .center) {
+                    lastPhotoButton
+                    Spacer()
+                    ShutterButton(isBusy: viewModel.isSavingPhoto) { viewModel.capture() }
+                    Spacer()
+                    Color.clear
+                        .frame(width: 48, height: 48)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 12)
 
                 FilterStrip(
                     presets: viewModel.stripPresets,
@@ -104,6 +112,13 @@ struct CameraScreen: View {
                 onSelect: { viewModel.selectPreset($0) }
             )
         }
+        .fullScreenCover(isPresented: $viewModel.isPreviewPresented) {
+            if let photo = viewModel.lastPhoto {
+                PhotoPreviewView(image: photo) {
+                    viewModel.isPreviewPresented = false
+                }
+            }
+        }
         .onAppear { viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
         .onChange(of: scenePhase) { _, phase in
@@ -116,6 +131,39 @@ struct CameraScreen: View {
                 break
             }
         }
+    }
+
+    /// 左下角：刚拍照片的缩略图，点开全屏预览。
+    @ViewBuilder
+    private var lastPhotoButton: some View {
+        Button {
+            guard viewModel.lastPhoto != nil else { return }
+            viewModel.isPreviewPresented = true
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.12))
+
+                if let photo = viewModel.lastPhoto {
+                    Image(uiImage: photo)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Image(systemName: "photo")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Theme.controlDim)
+                }
+            }
+            .frame(width: 48, height: 48)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.white.opacity(0.22), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.lastPhoto == nil)
+        .accessibilityLabel("查看刚拍的照片")
     }
 
     /// 覆盖全屏的透明层：点按对焦，并显示对焦框。

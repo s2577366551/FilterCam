@@ -30,6 +30,8 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var manualFocus: Float = 0.5
     @Published private(set) var photoResolution: PhotoResolution = .standard
     @Published private(set) var isLivePhotoEnabled = false
+    @Published private(set) var lastPhoto: UIImage?
+    @Published var isPreviewPresented = false
     @Published private(set) var previewContentSize: CGSize = .zero
 
     let previewRenderer: PreviewRenderer?
@@ -41,6 +43,7 @@ final class CameraViewModel: ObservableObject {
     private let filterPipeline: FilterPipeline
     private let thumbnailService: ThumbnailService
     private let photoSaver: PhotoLibrarySaver
+    private let renderContext: CIContext
     private let settingsLock = NSLock()
     private var settingsPreset: FilterPreset = .original
     private var settingsIntensity: Float = 0
@@ -72,6 +75,7 @@ final class CameraViewModel: ObservableObject {
         self.filterPipeline = pipeline
         self.thumbnailService = ThumbnailService(pipeline: pipeline, context: context)
         self.photoSaver = PhotoLibrarySaver(context: context)
+        self.renderContext = context
         self.filterStore = FilterStore()
         self.userLUTLibrary = library
 
@@ -254,6 +258,7 @@ final class CameraViewModel: ObservableObject {
                         adjustments: settings.adjustments
                     )
                 }
+                lastPhoto = makePreviewImage(from: captured, settings: settings)
                 showToast(
                     "已保存 \(info.pixelWidth)×\(info.pixelHeight)"
                         + (info.isLivePhoto ? " 实况" : "")
@@ -373,6 +378,36 @@ final class CameraViewModel: ObservableObject {
         settingsLock.lock()
         defer { settingsLock.unlock() }
         return (settingsPreset, settingsIntensity, settingsAdjustments)
+    }
+
+    /// 生成用于 App 内预览的缩略图（长边 2048，足够看清又不占内存）。
+    private func makePreviewImage(
+        from captured: CapturedPhoto,
+        settings: (preset: FilterPreset, intensity: Float, adjustments: FilterAdjustments)
+    ) -> UIImage? {
+        let oriented = captured.image.oriented(captured.orientation)
+        let extent = oriented.extent
+        let longest = max(extent.width, extent.height)
+        guard longest > 0 else { return nil }
+
+        let limit: CGFloat = 2048
+        let scale = min(1, limit / longest)
+        let scaled = oriented.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let filtered = filterPipeline.process(
+            scaled,
+            preset: settings.preset,
+            intensity: settings.intensity,
+            adjustments: settings.adjustments
+        )
+        guard let cgImage = renderContext.createCGImage(
+            filtered,
+            from: filtered.extent,
+            format: .RGBA8,
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)
+        ) else {
+            return nil
+        }
+        return UIImage(cgImage: cgImage)
     }
 
     /// 预览用的降采样：长边超过 1440 就等比缩小。拍照不走这里，保持全分辨率。
