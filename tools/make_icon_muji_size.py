@@ -46,9 +46,9 @@ def fit_font(draw, text, font_path, max_width, target_cap):
 
 
 def two_lines(top, bottom, font_path, target_cap, max_width, gap_ratio, y_center=S / 2):
-    img = base()
-    d = ImageDraw.Draw(img)
-    # 两行共用字号：以更宽的一行为准
+    # 先画在透明层上，再按实际墨迹包围盒居中，避免字体 ascent 让整体偏下。
+    layer = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
     size = int(target_cap / 0.716)
     font = ImageFont.truetype(font_path, size)
     widest = max(text_width(d, top, font), text_width(d, bottom, font))
@@ -59,18 +59,24 @@ def two_lines(top, bottom, font_path, target_cap, max_width, gap_ratio, y_center
     bbox = d.textbbox((0, 0), "H", font=font)
     cap = bbox[3] - bbox[1]
     gap = cap * gap_ratio
-    block = cap * 2 + gap
-    y_top = y_center - block / 2
+    y_top = 100
     d.text((S / 2, y_top), top, font=font, anchor="ma", fill=WHITE)
     d.text((S / 2, y_top + cap + gap), bottom, font=font, anchor="ma", fill=WHITE)
+
+    ink = layer.crop(layer.getbbox())
+    img = base()
+    img.alpha_composite(ink, ((S - ink.width) // 2, int(S / 2 - ink.height / 2)))
     return img, cap
 
 
 def one_line(text, font_path, target_cap, max_width):
-    img = base()
-    d = ImageDraw.Draw(img)
+    layer = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
     font, cap = fit_font(d, text, font_path, max_width, target_cap)
-    d.text((S / 2, S / 2), text, font=font, anchor="mm", fill=WHITE)
+    d.text((S / 2, 100), text, font=font, anchor="ma", fill=WHITE)
+    ink = layer.crop(layer.getbbox())
+    img = base()
+    img.alpha_composite(ink, ((S - ink.width) // 2, int(S / 2 - ink.height / 2)))
     return img, cap
 
 
