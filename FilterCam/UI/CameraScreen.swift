@@ -21,10 +21,14 @@ struct CameraScreen: View {
                     .ignoresSafeArea()
             }
 
+            focusLayer
+
             VStack(spacing: 0) {
                 TopBar(
                     flashMode: viewModel.flashMode,
+                    isManualFocus: viewModel.isManualFocusEnabled,
                     onFlash: { viewModel.toggleFlash() },
+                    onManualFocus: { viewModel.toggleManualFocus() },
                     onFlip: { viewModel.flipCamera() }
                 )
                 .padding(.top, 8)
@@ -42,6 +46,14 @@ struct CameraScreen: View {
                     IntensitySlider(
                         value: viewModel.intensity,
                         onChange: { viewModel.setIntensity($0) }
+                    )
+                    .padding(.bottom, 8)
+                }
+
+                if viewModel.isManualFocusEnabled {
+                    ManualFocusSlider(
+                        value: viewModel.manualFocus,
+                        onChange: { viewModel.setManualFocus($0) }
                     )
                     .padding(.bottom, 8)
                 }
@@ -100,6 +112,29 @@ struct CameraScreen: View {
                 break
             }
         }
+    }
+
+    /// 覆盖全屏的透明层：点按对焦，并显示对焦框。
+    private var focusLayer: some View {
+        GeometryReader { geo in
+            ZStack {
+                Color.clear
+                    .contentShape(Rectangle())
+
+                if let reticle = viewModel.focusReticle {
+                    FocusReticleView(isLocked: reticle.isLocked)
+                        .position(reticle.position)
+                        .allowsHitTesting(false)
+                }
+            }
+            .gesture(
+                SpatialTapGesture()
+                    .onEnded { value in
+                        viewModel.focus(at: value.location, in: geo.size)
+                    }
+            )
+        }
+        .ignoresSafeArea()
     }
 
     @ViewBuilder

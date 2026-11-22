@@ -123,6 +123,115 @@ final class CameraService: NSObject, CameraServicing {
         return largest
     }
 
+    // MARK: - 对焦
+
+    func focus(at devicePoint: CGPoint) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            sessionQueue.async {
+                do {
+                    try self.applyFocus(at: devicePoint)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    func setManualFocus(_ lensPosition: Float) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            sessionQueue.async {
+                do {
+                    try self.applyManualFocus(lensPosition)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    func resumeAutoFocus() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            sessionQueue.async {
+                do {
+                    try self.applyContinuousFocus()
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private func applyFocus(at point: CGPoint) throws {
+        guard let device = videoInput?.device else {
+            throw CameraError.configurationFailed("相机未就绪")
+        }
+        let clamped = CGPoint(
+            x: min(max(point.x, 0), 1),
+            y: min(max(point.y, 0), 1)
+        )
+        do {
+            try device.lockForConfiguration()
+        } catch {
+            throw CameraError.captureFailed("无法锁定相机配置")
+        }
+        defer { device.unlockForConfiguration() }
+
+        if device.isFocusPointOfInterestSupported {
+            device.focusPointOfInterest = clamped
+            if device.isFocusModeSupported(.autoFocus) {
+                device.focusMode = .autoFocus
+            }
+        }
+        if device.isExposurePointOfInterestSupported {
+            device.exposurePointOfInterest = clamped
+            if device.isExposureModeSupported(.autoExpose) {
+                device.exposureMode = .autoExpose
+            }
+        }
+    }
+
+    private func applyManualFocus(_ lensPosition: Float) throws {
+        guard let device = videoInput?.device else {
+            throw CameraError.configurationFailed("相机未就绪")
+        }
+        guard device.isFocusModeSupported(.locked) else {
+            throw CameraError.captureFailed("当前摄像头不支持手动对焦")
+        }
+        do {
+            try device.lockForConfiguration()
+        } catch {
+            throw CameraError.captureFailed("无法锁定相机配置")
+        }
+        defer { device.unlockForConfiguration() }
+
+        device.setFocusModeLocked(lensPosition: min(max(lensPosition, 0), 1))
+        if device.isExposureModeSupported(.continuousAutoExpose) {
+            device.exposureMode = .continuousAutoExpose
+        }
+    }
+
+    private func applyContinuousFocus() throws {
+        guard let device = videoInput?.device else {
+            throw CameraError.configurationFailed("相机未就绪")
+        }
+        do {
+            try device.lockForConfiguration()
+        } catch {
+            throw CameraError.captureFailed("无法锁定相机配置")
+        }
+        defer { device.unlockForConfiguration() }
+
+        if device.isFocusModeSupported(.continuousAutoFocus) {
+            device.focusMode = .continuousAutoFocus
+        }
+        if device.isExposureModeSupported(.continuousAutoExpose) {
+            device.exposureMode = .continuousAutoExpose
+        }
+    }
+
     private func configureIfNeeded() throws {
         guard !isConfigured else { return }
         session.beginConfiguration()
@@ -196,6 +305,16 @@ final class CameraService: NSObject, CameraServicing {
             Self.applyFormat(format, to: device)
         }
         Self.applyMaxPhotoDimensions(to: photoOutput, device: device)
+        // 换摄像头后回到连续自动对焦，避免沿用上一颗镜头的锁定状态。
+        if (try? device.lockForConfiguration()) != nil {
+            if device.isFocusModeSupported(.continuousAutoFocus) {
+                device.focusMode = .continuousAutoFocus
+            }
+            if device.isExposureModeSupported(.continuousAutoExpose) {
+                device.exposureMode = .continuousAutoExpose
+            }
+            device.unlockForConfiguration()
+        }
         applyConnectionSettings(position: newPosition)
     }
 

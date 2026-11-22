@@ -25,6 +25,10 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var toast: String?
     @Published private(set) var hasReceivedFrame = false
     @Published private(set) var isSavingPhoto = false
+    @Published private(set) var focusReticle: FocusReticle?
+    @Published private(set) var isManualFocusEnabled = false
+    @Published private(set) var manualFocus: Float = 0.5
+    @Published private(set) var previewContentSize: CGSize = .zero
 
     let previewRenderer: PreviewRenderer?
     let filterStore: FilterStore
@@ -41,6 +45,8 @@ final class CameraViewModel: ObservableObject {
     private var settingsAdjustments: FilterAdjustments = .neutral
     private var didCaptureThumbnailSource = false
     private var didReceiveFrame = false
+    private var frameSize: CGSize = .zero
+    private var reticleTask: Task<Void, Never>?
     private var adjustmentsByPreset: [String: FilterAdjustments] = [:]
     private var lastFrame: CIImage?
 
@@ -106,6 +112,8 @@ final class CameraViewModel: ObservableObject {
             do {
                 try await camera.switchCamera()
                 isFrontCamera.toggle()
+                isManualFocusEnabled = false
+                focusReticle = nil
                 settingsLock.lock()
                 didCaptureThumbnailSource = false
                 settingsLock.unlock()
@@ -114,6 +122,70 @@ final class CameraViewModel: ObservableObject {
                 Log.camera.error("切换摄像头失败: \(error.localizedDescription)")
             }
         }
+    }
+
+    // MARK: - 对焦
+
+    /// 点击画面：在该点自动对焦并自动曝光。
+    func focus(at viewPoint: CGPoint, in bounds: CGSize) {
+        guard !isManualFocusEnabled else { return }
+        guard let devicePoint = devicePoint(from: viewPoint, in: bounds) else { return }
+        showReticle(at: viewPoint, locked: false)
+        Haptics.selection()
+        Task { try? await camera.focus(at: devicePoint) }
+    }
+
+    func toggleManualFocus() {
+        isManualFocusEnabled.toggle()
+        focusReticle = nil
+        if isManualFocusEnabled {
+            let value = manualFocus
+            Task { try? await camera.setManualFocus(value) }
+        } else {
+            Task { try? await camera.resumeAutoFocus() }
+        }
+        Haptics.selection()
+    }
+
+    func setManualFocus(_ value: Float) {
+        manualFocus = min(max(value, 0), 1)
+        guard isManualFocusEnabled else { return }
+        let target = manualFocus
+        Task { try? await camera.setManualFocus(target) }
+    }
+
+    private func showReticle(at point: CGPoint, locked: Bool) {
+        reticleTask?.cancel()
+        withAnimation(.easeOut(duration: 0.12)) {
+            focusReticle = FocusReticle(position: point, isLocked: locked)
+        }
+        guard !locked else { return }
+        reticleTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeIn(duration: 0.25)) {
+                self?.focusReticle = nil
+            }
+        }
+    }
+
+    /// 屏幕点击坐标 → 相机设备坐标（0...1）。预览是 AspectFill 裁切，需要反算。
+    private func devicePoint(from viewPoint: CGPoint, in bounds: CGSize) -> CGPoint? {
+        let content = previewContentSize
+        guard content.width > 0, content.height > 0,
+              bounds.width > 0, bounds.height > 0 else { return nil }
+
+        let transform = AspectFill.transform(
+            contentSize: content,
+            in: CGRect(origin: .zero, size: bounds)
+        )
+        let inContent = viewPoint.applying(transform.inverted())
+        let nx = min(max(inContent.x / content.width, 0), 1)
+        let ny = min(max(inContent.y / content.height, 0), 1)
+
+        // 预览由传感器画面顺时针旋转 90° 得到；前置摄像头额外做了水平镜像。
+        let u = isFrontCamera ? nx : 1 - nx
+        return CGPoint(x: ny, y: u)
     }
 
     func selectPreset(_ preset: FilterPreset) {
@@ -188,11 +260,14 @@ final class CameraViewModel: ObservableObject {
             let isFirstFrame = !self.didReceiveFrame
             if isFirstFrame {
                 self.didReceiveFrame = true
+                self.frameSize = previewSource.extent.size
             }
+            let size = self.frameSize
             self.settingsLock.unlock()
             if isFirstFrame {
                 DispatchQueue.main.async {
                     self.hasReceivedFrame = true
+                    self.previewContentSize = size
                 }
             }
             self.captureThumbnailSource(from: previewSource)

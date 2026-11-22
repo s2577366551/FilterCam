@@ -52,4 +52,11 @@ protocol CameraServicing: AnyObject {
     func switchCamera() async throws
     func setFlashMode(_ mode: FlashMode)
     func capturePhoto() async throws -> CapturedPhoto
+
+    /// 在指定设备坐标点自动对焦并自动曝光（坐标范围 0...1）。
+    func focus(at devicePoint: CGPoint) async throws
+    /// 锁定到指定镜头位置（0 = 最近，1 = 无限远）。
+    func setManualFocus(_ lensPosition: Float) async throws
+    /// 恢复连续自动对焦。
+    func resumeAutoFocus() async throws
 }

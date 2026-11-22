@@ -2,11 +2,13 @@ import SwiftUI
 
 struct TopBar: View {
     let flashMode: FlashMode
+    let isManualFocus: Bool
     let onFlash: () -> Void
+    let onManualFocus: () -> Void
     let onFlip: () -> Void
 
     var body: some View {
-        HStack {
+        HStack(spacing: 10) {
             Button(action: onFlash) {
                 Label(flashMode.displayName, systemImage: flashSymbol)
                     .labelStyle(.titleAndIcon)
@@ -16,6 +18,19 @@ struct TopBar: View {
                     .frame(height: Theme.hitTarget)
                     .background(Theme.overlay, in: Capsule())
             }
+
+            Button(action: onManualFocus) {
+                Text("MF")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isManualFocus ? Color.black : Theme.control)
+                    .padding(.horizontal, 14)
+                    .frame(height: Theme.hitTarget)
+                    .background(
+                        isManualFocus ? Color.yellow : Theme.overlay,
+                        in: Capsule()
+                    )
+            }
+            .accessibilityLabel("手动对焦")
 
             Spacer()
 
