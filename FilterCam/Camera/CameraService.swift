@@ -127,12 +127,19 @@ final class CameraService: NSObject, CameraServicing {
         guard !isConfigured else { return }
         session.beginConfiguration()
         defer { session.commitConfiguration() }
-        // 用 .photo 预设，让照片输出拿到设备的最大拍照分辨率（约 4032×3024），
-        // 而不是被 1080p 视频预设限制。
-        session.sessionPreset = .photo
+        // 用 .inputPriority 手动挑格式：要求视频尺寸不超过 12MP（保证预览帧不过大），
+        // 同时在该约束下取「支持的最大拍照尺寸」最大的格式。
+        // iPhone 15 Pro 上这样可以拿到 8064×6048（4800 万）的静态拍照能力，
+        // 而预览仍然走 4032×3024 的视频流。
+        session.sessionPreset = .inputPriority
 
         guard let device = Self.device(position: position) else {
             throw CameraError.noCameraAvailable
+        }
+        if let format = Self.bestPhotoFormat(for: device) {
+            Self.applyFormat(format, to: device)
+        } else {
+            session.sessionPreset = .photo
         }
         let input = try AVCaptureDeviceInput(device: device)
         guard session.canAddInput(input) else {
@@ -156,6 +163,7 @@ final class CameraService: NSObject, CameraServicing {
         }
         session.addOutput(photoOutput)
         photoOutput.maxPhotoQualityPrioritization = .quality
+        Self.applyMaxPhotoDimensions(to: photoOutput, device: device)
 
         applyConnectionSettings(position: position)
         isConfigured = true
@@ -184,7 +192,66 @@ final class CameraService: NSObject, CameraServicing {
         session.addInput(input)
         videoInput = input
         position = newPosition
+        if let format = Self.bestPhotoFormat(for: device) {
+            Self.applyFormat(format, to: device)
+        }
+        Self.applyMaxPhotoDimensions(to: photoOutput, device: device)
         applyConnectionSettings(position: newPosition)
+    }
+
+    // MARK: - 格式选择
+
+    /// 在视频尺寸不超过 12MP 的格式里，挑拍照尺寸最大的那个。
+    private static func bestPhotoFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
+        let candidates = device.formats.filter { format in
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            guard dims.width > 0, dims.height > 0 else { return false }
+            guard dims.width <= 4032, dims.height <= 3024 else { return false }
+            let ranges = format.videoSupportedFrameRateRanges
+            guard let maxRate = ranges.map(\.maxFrameRate).max() else { return false }
+            return maxRate >= 24
+        }
+        return candidates.max { lhs, rhs in
+            photoArea(lhs) < photoArea(rhs)
+        }
+    }
+
+    private static func photoArea(_ format: AVCaptureDevice.Format) -> Int {
+        format.supportedMaxPhotoDimensions.reduce(0) { partial, dims in
+            max(partial, Int(dims.width) * Int(dims.height))
+        }
+    }
+
+    private static func applyFormat(_ format: AVCaptureDevice.Format, to device: AVCaptureDevice) {
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            device.activeFormat = format
+            let target: Double = 30
+            if format.videoSupportedFrameRateRanges.contains(where: {
+                $0.minFrameRate <= target && $0.maxFrameRate >= target
+            }) {
+                let duration = CMTime(value: 1, timescale: CMTimeScale(target))
+                device.activeVideoMinFrameDuration = duration
+                device.activeVideoMaxFrameDuration = duration
+            }
+        } catch {
+            Log.camera.error("设置相机格式失败: \(error.localizedDescription)")
+        }
+    }
+
+    private static func applyMaxPhotoDimensions(
+        to output: AVCapturePhotoOutput,
+        device: AVCaptureDevice
+    ) {
+        let largest = device.activeFormat.supportedMaxPhotoDimensions.max { lhs, rhs in
+            Int(lhs.width) * Int(lhs.height) < Int(rhs.width) * Int(rhs.height)
+        }
+        guard let largest, largest.width > 0, largest.height > 0 else { return }
+        output.maxPhotoDimensions = largest
+        Log.camera.info(
+            "拍照尺寸: \(largest.width)x\(largest.height)"
+        )
     }
 
     private func applyConnectionSettings(position: AVCaptureDevice.Position) {
