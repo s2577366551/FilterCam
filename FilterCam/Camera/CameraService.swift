@@ -13,6 +13,7 @@ final class CameraService: NSObject, CameraServicing {
     private var videoInput: AVCaptureDeviceInput?
     private var position: AVCaptureDevice.Position = .back
     private var flashMode: FlashMode = .auto
+    private var photoResolution: PhotoResolution = .standard
     private var isConfigured = false
     private var isObserving = false
     private let photoLock = NSLock()
@@ -65,6 +66,10 @@ final class CameraService: NSObject, CameraServicing {
         sessionQueue.async { self.flashMode = mode }
     }
 
+    func setPhotoResolution(_ resolution: PhotoResolution) {
+        sessionQueue.async { self.photoResolution = resolution }
+    }
+
     func capturePhoto() async throws -> CapturedPhoto {
         try await withCheckedThrowingContinuation { continuation in
             sessionQueue.async {
@@ -98,7 +103,7 @@ final class CameraService: NSObject, CameraServicing {
             settings = AVCapturePhotoSettings()
         }
 
-        settings.maxPhotoDimensions = bestPhotoDimensions()
+        settings.maxPhotoDimensions = photoDimensions(for: photoResolution)
         settings.photoQualityPrioritization = .quality
         if photoOutput.supportedFlashModes.contains(flashMode.avMode) {
             settings.flashMode = flashMode.avMode
@@ -106,21 +111,24 @@ final class CameraService: NSObject, CameraServicing {
         return settings
     }
 
-    /// 取设备当前格式支持的最大拍照尺寸，并限制在输出端允许的范围内。
-    private func bestPhotoDimensions() -> CMVideoDimensions {
+    /// 按档位从设备支持的尺寸里挑一个：
+    /// - 标准：不超过 1200 万像素的最大档（通常就是 4032×3024）
+    /// - 高清：传感器最大尺寸（iPhone 15 Pro 上是 8064×6048）
+    private func photoDimensions(for resolution: PhotoResolution) -> CMVideoDimensions {
         let allowed = photoOutput.maxPhotoDimensions
-        let allowedArea = Int(allowed.width) * Int(allowed.height)
-
         guard let device = videoInput?.device else { return allowed }
-        let candidates = device.activeFormat.supportedMaxPhotoDimensions
-        let largest = candidates.max { lhs, rhs in
-            Int(lhs.width) * Int(lhs.height) < Int(rhs.width) * Int(rhs.height)
-        }
-        guard let largest else { return allowed }
-        if allowedArea > 0, Int(largest.width) * Int(largest.height) > allowedArea {
+        let supported = device.activeFormat.supportedMaxPhotoDimensions
+            .sorted { Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height) }
+        guard let smallest = supported.first, let largest = supported.last else {
             return allowed
         }
-        return largest
+        switch resolution {
+        case .high:
+            return largest
+        case .standard:
+            let limit = 12_000_000
+            return supported.last { Int($0.width) * Int($0.height) <= limit } ?? smallest
+        }
     }
 
     // MARK: - 对焦

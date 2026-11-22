@@ -27,8 +27,10 @@ struct CameraScreen: View {
                 TopBar(
                     flashMode: viewModel.flashMode,
                     isManualFocus: viewModel.isManualFocusEnabled,
+                    resolutionBadge: viewModel.photoResolution.badge,
                     onFlash: { viewModel.toggleFlash() },
                     onManualFocus: { viewModel.toggleManualFocus() },
+                    onResolution: { viewModel.togglePhotoResolution() },
                     onFlip: { viewModel.flipCamera() }
                 )
                 .padding(.top, 8)

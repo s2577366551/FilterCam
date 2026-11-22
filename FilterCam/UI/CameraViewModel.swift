@@ -28,6 +28,7 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var focusReticle: FocusReticle?
     @Published private(set) var isManualFocusEnabled = false
     @Published private(set) var manualFocus: Float = 0.5
+    @Published private(set) var photoResolution: PhotoResolution = .standard
     @Published private(set) var previewContentSize: CGSize = .zero
 
     let previewRenderer: PreviewRenderer?
@@ -105,6 +106,13 @@ final class CameraViewModel: ObservableObject {
         let index = all.firstIndex(of: flashMode) ?? 0
         flashMode = all[(index + 1) % all.count]
         camera.setFlashMode(flashMode)
+    }
+
+    func togglePhotoResolution() {
+        photoResolution = photoResolution == .standard ? .high : .standard
+        camera.setPhotoResolution(photoResolution)
+        showToast("拍照画质：\(photoResolution.displayName)")
+        Haptics.selection()
     }
 
     func flipCamera() {

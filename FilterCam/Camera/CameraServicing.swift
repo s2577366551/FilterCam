@@ -19,6 +19,28 @@ enum CameraRuntimeState: Equatable {
     case failed(CameraError)
 }
 
+/// 拍照分辨率档位。标准档与原生相机同级的 1200 万像素，高清档用传感器最大尺寸。
+enum PhotoResolution: String, CaseIterable, Identifiable {
+    case standard
+    case high
+
+    var id: String { rawValue }
+
+    var badge: String {
+        switch self {
+        case .standard: return "12M"
+        case .high: return "MAX"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .standard: return "标准画质"
+        case .high: return "最高画质"
+        }
+    }
+}
+
 enum FlashMode: String, CaseIterable, Identifiable {
     case auto
     case on
@@ -51,6 +73,7 @@ protocol CameraServicing: AnyObject {
     func stop()
     func switchCamera() async throws
     func setFlashMode(_ mode: FlashMode)
+    func setPhotoResolution(_ resolution: PhotoResolution)
     func capturePhoto() async throws -> CapturedPhoto
 
     /// 在指定设备坐标点自动对焦并自动曝光（坐标范围 0...1）。
