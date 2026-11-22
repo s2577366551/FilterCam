@@ -288,14 +288,30 @@ final class PhotoLibrarySaver {
         let frontOriented = frontTrack.naturalSize.applying(frontTrack.preferredTransform)
         let frontSize = CGSize(width: abs(frontOriented.width), height: abs(frontOriented.height))
         let scale = max(insetRect.width / frontSize.width, insetRect.height / frontSize.height)
+        // 缩放后的画面在小窗里居中（aspect fill，超出部分由主画面盖住边缘）。
+        let scaledWidth = frontSize.width * scale
+        let scaledHeight = frontSize.height * scale
         let frontTransform = frontTrack.preferredTransform
             .concatenating(CGAffineTransform(scaleX: scale, y: scale))
-            .concatenating(CGAffineTransform(translationX: insetRect.minX, y: insetRect.minY))
+            .concatenating(CGAffineTransform(
+                translationX: insetRect.midX - scaledWidth / 2,
+                y: insetRect.midY - scaledHeight / 2
+            ))
         frontLayer.setTransform(frontTransform, at: .zero)
 
+        // 把前摄裁成小窗的 3:4 比例（crop 在素材原始像素坐标里，先算好再交给 AV）。
+        let cropRect = insetRect.applying(frontTransform.inverted())
+        let naturalBounds = CGRect(origin: .zero, size: frontTrack.naturalSize)
+        let clampedCrop = cropRect.intersection(naturalBounds)
+        if !clampedCrop.isNull, clampedCrop.width > 1, clampedCrop.height > 1 {
+            frontLayer.setCropRectangle(clampedCrop, at: .zero)
+        }
+
+        // AVFoundation 的 layerInstructions 是「第一个在最上层」，
+        // 所以前摄小窗必须排在前面，后摄主画面排后面。
         instruction.layerInstructions = [
-            backLayer as AVVideoCompositionLayerInstruction,
-            frontLayer as AVVideoCompositionLayerInstruction
+            frontLayer as AVVideoCompositionLayerInstruction,
+            backLayer as AVVideoCompositionLayerInstruction
         ]
         videoComposition.instructions = [
             instruction as AVVideoCompositionInstructionProtocol
