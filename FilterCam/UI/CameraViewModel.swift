@@ -24,6 +24,7 @@ final class CameraViewModel: ObservableObject {
     @Published var isLibraryPresented = false
     @Published private(set) var toast: String?
     @Published private(set) var hasReceivedFrame = false
+    @Published private(set) var isSavingPhoto = false
 
     let previewRenderer: PreviewRenderer?
     let filterStore: FilterStore
@@ -33,6 +34,7 @@ final class CameraViewModel: ObservableObject {
     private let permission: CameraPermissionProviding
     private let filterPipeline: FilterPipeline
     private let thumbnailService: ThumbnailService
+    private let photoSaver: PhotoLibrarySaver
     private let settingsLock = NSLock()
     private var settingsPreset: FilterPreset = .original
     private var settingsIntensity: Float = 0
@@ -61,6 +63,7 @@ final class CameraViewModel: ObservableObject {
         self.previewRenderer = previewRenderer
         self.filterPipeline = pipeline
         self.thumbnailService = ThumbnailService(pipeline: pipeline, context: context)
+        self.photoSaver = PhotoLibrarySaver(context: context)
         self.filterStore = FilterStore()
         self.userLUTLibrary = library
 
@@ -141,11 +144,25 @@ final class CameraViewModel: ObservableObject {
     }
 
     func capture() {
+        guard !isSavingPhoto else { return }
+        isSavingPhoto = true
         Task {
+            defer { isSavingPhoto = false }
             do {
-                let data = try await camera.capturePhoto()
+                let captured = try await camera.capturePhoto()
                 Haptics.shutter()
-                showToast("已拍摄 \(data.count / 1024) KB（保存将在下一阶段接入）")
+
+                let settings = currentSettings()
+                let pipeline = filterPipeline
+                let info = try await photoSaver.save(captured) { image in
+                    pipeline.process(
+                        image,
+                        preset: settings.preset,
+                        intensity: settings.intensity,
+                        adjustments: settings.adjustments
+                    )
+                }
+                showToast("已保存 \(info.pixelWidth)×\(info.pixelHeight)")
             } catch {
                 showToast(error.localizedDescription)
             }
@@ -155,16 +172,19 @@ final class CameraViewModel: ObservableObject {
     private func bindCamera() {
         camera.onFrame = { [weak self] image in
             guard let self else { return }
+            // .photo 预设下视频帧是传感器全尺寸（约 4032×3024）。
+            // 预览只需要够清楚的尺寸，先降采样再走滤镜，避免每帧处理千万像素。
+            let previewSource = Self.downscaledForPreview(image)
             let settings = self.currentSettings()
             let output = self.filterPipeline.process(
-                image,
+                previewSource,
                 preset: settings.preset,
                 intensity: settings.intensity,
                 adjustments: settings.adjustments
             )
             self.previewRenderer?.submit(output)
             self.settingsLock.lock()
-            self.lastFrame = image
+            self.lastFrame = previewSource
             let isFirstFrame = !self.didReceiveFrame
             if isFirstFrame {
                 self.didReceiveFrame = true
@@ -175,7 +195,7 @@ final class CameraViewModel: ObservableObject {
                     self.hasReceivedFrame = true
                 }
             }
-            self.captureThumbnailSource(from: image)
+            self.captureThumbnailSource(from: previewSource)
         }
         camera.onStateChange = { [weak self] runtime in
             Task { @MainActor in
@@ -255,6 +275,16 @@ final class CameraViewModel: ObservableObject {
         settingsLock.lock()
         defer { settingsLock.unlock() }
         return (settingsPreset, settingsIntensity, settingsAdjustments)
+    }
+
+    /// 预览用的降采样：长边超过 1440 就等比缩小。拍照不走这里，保持全分辨率。
+    private static func downscaledForPreview(_ image: CIImage) -> CIImage {
+        let extent = image.extent
+        let longest = max(extent.width, extent.height)
+        let limit: CGFloat = 1440
+        guard longest > limit, longest > 0 else { return image }
+        let scale = limit / longest
+        return image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
     }
 
     private func captureThumbnailSource(from image: CIImage) {

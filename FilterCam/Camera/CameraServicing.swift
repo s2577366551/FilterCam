@@ -1,5 +1,16 @@
 import AVFoundation
 import CoreImage
+import ImageIO
+
+/// 一张全分辨率照片：像素、方向、EXIF 元数据。
+struct CapturedPhoto {
+    let image: CIImage
+    let orientation: CGImagePropertyOrientation
+    let metadata: [String: Any]
+
+    var pixelWidth: Int { Int(image.extent.width) }
+    var pixelHeight: Int { Int(image.extent.height) }
+}
 
 enum CameraRuntimeState: Equatable {
     case idle
@@ -40,5 +51,5 @@ protocol CameraServicing: AnyObject {
     func stop()
     func switchCamera() async throws
     func setFlashMode(_ mode: FlashMode)
-    func capturePhoto() async throws -> Data
+    func capturePhoto() async throws -> CapturedPhoto
 }

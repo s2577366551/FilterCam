@@ -1,5 +1,7 @@
 import AVFoundation
 import CoreImage
+import CoreMedia
+import ImageIO
 
 final class CameraService: NSObject, CameraServicing {
     private let session = AVCaptureSession()
@@ -14,7 +16,7 @@ final class CameraService: NSObject, CameraServicing {
     private var isConfigured = false
     private var isObserving = false
     private let photoLock = NSLock()
-    private var photoContinuation: CheckedContinuation<Data, Error>?
+    private var photoContinuation: CheckedContinuation<CapturedPhoto, Error>?
 
     var onFrame: ((CIImage) -> Void)?
     var onStateChange: ((CameraRuntimeState) -> Void)?
@@ -63,7 +65,7 @@ final class CameraService: NSObject, CameraServicing {
         sessionQueue.async { self.flashMode = mode }
     }
 
-    func capturePhoto() async throws -> Data {
+    func capturePhoto() async throws -> CapturedPhoto {
         try await withCheckedThrowingContinuation { continuation in
             sessionQueue.async {
                 guard self.session.isRunning else {
@@ -81,20 +83,53 @@ final class CameraService: NSObject, CameraServicing {
                     return
                 }
 
-                let settings = AVCapturePhotoSettings()
-                if self.photoOutput.supportedFlashModes.contains(self.flashMode.avMode) {
-                    settings.flashMode = self.flashMode.avMode
-                }
+                let settings = self.makePhotoSettings()
                 self.photoOutput.capturePhoto(with: settings, delegate: self)
             }
         }
+    }
+
+    /// 按当前设备能力生成全分辨率、最高质量的拍照参数。
+    private func makePhotoSettings() -> AVCapturePhotoSettings {
+        let settings: AVCapturePhotoSettings
+        if photoOutput.availablePhotoCodecTypes.contains(.hevc) {
+            settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
+        } else {
+            settings = AVCapturePhotoSettings()
+        }
+
+        settings.maxPhotoDimensions = bestPhotoDimensions()
+        settings.photoQualityPrioritization = .quality
+        if photoOutput.supportedFlashModes.contains(flashMode.avMode) {
+            settings.flashMode = flashMode.avMode
+        }
+        return settings
+    }
+
+    /// 取设备当前格式支持的最大拍照尺寸，并限制在输出端允许的范围内。
+    private func bestPhotoDimensions() -> CMVideoDimensions {
+        let allowed = photoOutput.maxPhotoDimensions
+        let allowedArea = Int(allowed.width) * Int(allowed.height)
+
+        guard let device = videoInput?.device else { return allowed }
+        let candidates = device.activeFormat.supportedMaxPhotoDimensions
+        let largest = candidates.max { lhs, rhs in
+            Int(lhs.width) * Int(lhs.height) < Int(rhs.width) * Int(rhs.height)
+        }
+        guard let largest else { return allowed }
+        if allowedArea > 0, Int(largest.width) * Int(largest.height) > allowedArea {
+            return allowed
+        }
+        return largest
     }
 
     private func configureIfNeeded() throws {
         guard !isConfigured else { return }
         session.beginConfiguration()
         defer { session.commitConfiguration() }
-        session.sessionPreset = .hd1920x1080
+        // 用 .photo 预设，让照片输出拿到设备的最大拍照分辨率（约 4032×3024），
+        // 而不是被 1080p 视频预设限制。
+        session.sessionPreset = .photo
 
         guard let device = Self.device(position: position) else {
             throw CameraError.noCameraAvailable
@@ -120,6 +155,7 @@ final class CameraService: NSObject, CameraServicing {
             throw CameraError.configurationFailed("无法添加照片输出")
         }
         session.addOutput(photoOutput)
+        photoOutput.maxPhotoQualityPrioritization = .quality
 
         applyConnectionSettings(position: position)
         isConfigured = true
@@ -214,7 +250,7 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
         didFinishProcessingPhoto photo: AVCapturePhoto,
         error: Error?
     ) {
-        let continuation: CheckedContinuation<Data, Error>?
+        let continuation: CheckedContinuation<CapturedPhoto, Error>?
         photoLock.lock()
         continuation = photoContinuation
         photoContinuation = nil
@@ -224,10 +260,35 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
             continuation?.resume(throwing: CameraError.captureFailed(error.localizedDescription))
             return
         }
-        guard let data = photo.fileDataRepresentation() else {
+        guard let image = Self.makeImage(from: photo) else {
             continuation?.resume(throwing: CameraError.captureFailed("照片数据为空"))
             return
         }
-        continuation?.resume(returning: data)
+        let rawOrientation = (photo.metadata[kCGImagePropertyOrientation as String] as? NSNumber)?.uint32Value
+        // App 只支持竖屏，缺失时按「竖拍」处理。
+        let orientation = rawOrientation.flatMap(CGImagePropertyOrientation.init(rawValue:)) ?? .right
+        continuation?.resume(
+            returning: CapturedPhoto(
+                image: image,
+                orientation: orientation,
+                metadata: photo.metadata
+            )
+        )
+    }
+
+    /// 优先用解码后的像素缓冲，避免多一次 JPEG/HEIF 解码带来的画质损失。
+    private static func makeImage(from photo: AVCapturePhoto) -> CIImage? {
+        if let buffer = photo.pixelBuffer {
+            return CIImage(cvPixelBuffer: buffer)
+        }
+        if let cgImage = photo.cgImageRepresentation() {
+            return CIImage(cgImage: cgImage)
+        }
+        if let data = photo.fileDataRepresentation(),
+           let source = CGImageSourceCreateWithData(data as CFData, nil),
+           let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+            return CIImage(cgImage: cgImage)
+        }
+        return nil
     }
 }

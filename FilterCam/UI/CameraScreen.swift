@@ -46,7 +46,7 @@ struct CameraScreen: View {
                     .padding(.bottom, 8)
                 }
 
-                ShutterButton { viewModel.capture() }
+                ShutterButton(isBusy: viewModel.isSavingPhoto) { viewModel.capture() }
                     .padding(.bottom, 12)
 
                 FilterStrip(
