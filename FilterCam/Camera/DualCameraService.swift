@@ -156,10 +156,14 @@ final class DualCameraService: NSObject, CameraServicing {
         Self.applyMaxPhotoDimensions(to: backPhotoOutput, device: backDevice)
         Self.applyMaxPhotoDimensions(to: frontPhotoOutput, device: frontDevice)
 
-        addConnection(input: back, output: backVideoOutput, mirrored: false)
-        addConnection(input: front, output: frontVideoOutput, mirrored: true)
-        addConnection(input: back, output: backPhotoOutput, mirrored: false)
-        addConnection(input: front, output: frontPhotoOutput, mirrored: true)
+        guard addConnection(input: back, output: backVideoOutput, mirrored: false) != nil,
+              addConnection(input: front, output: frontVideoOutput, mirrored: true) != nil else {
+            throw CameraError.configurationFailed("无法连接前后摄像头预览")
+        }
+        guard addConnection(input: back, output: backPhotoOutput, mirrored: false) != nil,
+              addConnection(input: front, output: frontPhotoOutput, mirrored: true) != nil else {
+            throw CameraError.configurationFailed("无法连接前后摄像头拍照")
+        }
 
         // 双路 1080p 超出硬件预算时退回 720p。
         if session.hardwareCost > 1.0 {
@@ -240,27 +244,31 @@ final class DualCameraService: NSObject, CameraServicing {
 
     private func addPhotoOutputsIfNeeded() throws {
         guard let backInput, let frontInput else { return }
-        if backPhotoOutput.connection(with: .video) == nil {
+        if !session.outputs.contains(where: { $0 === backPhotoOutput }) {
             guard session.canAddOutput(backPhotoOutput) else {
                 throw CameraError.configurationFailed("无法添加后摄照片输出")
             }
             session.addOutputWithNoConnections(backPhotoOutput)
-            addConnection(input: backInput, output: backPhotoOutput, mirrored: false)
+            guard addConnection(input: backInput, output: backPhotoOutput, mirrored: false) != nil else {
+                throw CameraError.configurationFailed("无法连接后摄拍照")
+            }
         }
-        if frontPhotoOutput.connection(with: .video) == nil {
+        if !session.outputs.contains(where: { $0 === frontPhotoOutput }) {
             guard session.canAddOutput(frontPhotoOutput) else {
                 throw CameraError.configurationFailed("无法添加前摄照片输出")
             }
             session.addOutputWithNoConnections(frontPhotoOutput)
-            addConnection(input: frontInput, output: frontPhotoOutput, mirrored: true)
+            guard addConnection(input: frontInput, output: frontPhotoOutput, mirrored: true) != nil else {
+                throw CameraError.configurationFailed("无法连接前摄拍照")
+            }
         }
     }
 
     private func removePhotoOutputs() {
-        if backPhotoOutput.connection(with: .video) != nil {
+        if session.outputs.contains(where: { $0 === backPhotoOutput }) {
             session.removeOutput(backPhotoOutput)
         }
-        if frontPhotoOutput.connection(with: .video) != nil {
+        if session.outputs.contains(where: { $0 === frontPhotoOutput }) {
             session.removeOutput(frontPhotoOutput)
         }
     }
@@ -274,8 +282,10 @@ final class DualCameraService: NSObject, CameraServicing {
             }
             session.addOutputWithNoConnections(output)
         }
-        addConnection(input: backInput, output: backMovieOutput, mirrored: false)
-        addConnection(input: frontInput, output: frontMovieOutput, mirrored: true)
+        guard addConnection(input: backInput, output: backMovieOutput, mirrored: false) != nil,
+              addConnection(input: frontInput, output: frontMovieOutput, mirrored: true) != nil else {
+            throw CameraError.configurationFailed("无法连接前后摄像头录像")
+        }
         backMovieOutput.movieFragmentInterval = .invalid
         frontMovieOutput.movieFragmentInterval = .invalid
         movieOutputsAdded = true
@@ -285,8 +295,12 @@ final class DualCameraService: NSObject, CameraServicing {
 
     private func removeMovieOutputs() {
         guard movieOutputsAdded else { return }
-        session.removeOutput(backMovieOutput)
-        session.removeOutput(frontMovieOutput)
+        if session.outputs.contains(where: { $0 === backMovieOutput }) {
+            session.removeOutput(backMovieOutput)
+        }
+        if session.outputs.contains(where: { $0 === frontMovieOutput }) {
+            session.removeOutput(frontMovieOutput)
+        }
         movieOutputsAdded = false
         if let audioInput {
             session.removeInput(audioInput)
