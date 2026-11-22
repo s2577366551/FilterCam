@@ -47,6 +47,9 @@ final class CameraService: NSObject, CameraServicing {
                         self.session.startRunning()
                         CrashLogger.breadcrumb("单摄: startRunning 返回")
                     }
+                    if let device = self.videoInput?.device {
+                        Self.configureFocus(for: device)
+                    }
                     self.onStateChange?(.running)
                     continuation.resume()
                 } catch {
@@ -195,6 +198,9 @@ final class CameraService: NSObject, CameraServicing {
                 } else {
                     session.sessionPreset = .high
                 }
+                if let device = videoInput?.device {
+                    Self.configureFocus(for: device)
+                }
 
                 addAudioInputIfPossible()
 
@@ -223,6 +229,7 @@ final class CameraService: NSObject, CameraServicing {
                    let format = Self.bestPhotoFormat(for: device) {
                     Self.applyFormat(format, to: device)
                     Self.applyMaxPhotoDimensions(to: photoOutput, device: device)
+                    Self.configureFocus(for: device)
                 } else {
                     session.sessionPreset = .photo
                 }

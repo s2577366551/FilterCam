@@ -66,6 +66,12 @@ final class DualCameraService: NSObject, CameraServicing {
                         self.session.startRunning()
                         CrashLogger.breadcrumb("双摄: startRunning 返回")
                     }
+                    if let back = self.backInput?.device {
+                        Self.configureFocus(for: back)
+                    }
+                    if let front = self.frontInput?.device {
+                        Self.configureFocus(for: front)
+                    }
                     self.onStateChange?(.running)
                     CrashLogger.breadcrumb("双摄: 已运行")
                     continuation.resume()
