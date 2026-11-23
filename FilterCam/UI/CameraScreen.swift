@@ -85,6 +85,8 @@ struct CameraScreen: View {
                     }
             }
 
+            topActionButtons
+
             overlay
 
             if viewModel.isRecording {
@@ -125,15 +127,11 @@ struct CameraScreen: View {
                 .allowsHitTesting(false)
             }
         }
-        .sheet(isPresented: $viewModel.isLibraryPresented) {
-            FilterLibraryView(
-                store: viewModel.filterStore,
-                userLUTs: viewModel.userLUTLibrary,
-                thumbnails: viewModel.thumbnails,
-                selectedID: viewModel.selectedPreset.id,
-                onSelect: { viewModel.selectPreset($0) },
-                onLUTChanged: { viewModel.refreshThumbnail(for: $0) }
-            )
+        .sheet(isPresented: $viewModel.isFilterSheetPresented) {
+            FilterPanel(viewModel: viewModel)
+        }
+        .sheet(isPresented: $viewModel.isAdjustSheetPresented) {
+            AdjustPanel(viewModel: viewModel)
         }
         .sheet(isPresented: $viewModel.isWatermarkSheetPresented) {
             WatermarkSheet(store: viewModel.watermarkStore)
@@ -173,21 +171,6 @@ struct CameraScreen: View {
     /// 底部控制区：整块吃掉点击，避免控件之间的空隙穿透到全屏对焦层。
     private var bottomControls: some View {
         VStack(spacing: 0) {
-            if viewModel.selectedPreset.id != FilterPreset.original.id {
-                AdjustmentPanel(
-                    adjustments: viewModel.adjustments,
-                    onChange: { viewModel.setAdjustments($0) },
-                    onReset: { viewModel.resetAdjustments() }
-                )
-                .padding(.bottom, 4)
-
-                IntensitySlider(
-                    value: viewModel.intensity,
-                    onChange: { viewModel.setIntensity($0) }
-                )
-                .padding(.bottom, 8)
-            }
-
             if viewModel.isManualFocusEnabled {
                 ManualFocusSlider(
                     value: viewModel.manualFocus,
@@ -195,15 +178,6 @@ struct CameraScreen: View {
                 )
                 .padding(.bottom, 8)
             }
-
-            FilterStrip(
-                presets: viewModel.stripPresets,
-                thumbnails: viewModel.thumbnails,
-                selectedID: viewModel.selectedPreset.id,
-                onSelect: { viewModel.selectPreset($0) },
-                onOpenLibrary: { viewModel.isLibraryPresented = true }
-            )
-            .padding(.bottom, 4)
 
             HStack(alignment: .center) {
                 lastPhotoButton
@@ -236,6 +210,54 @@ struct CameraScreen: View {
                 .contentShape(Rectangle())
                 .onTapGesture { }
         )
+    }
+
+    /// 右上角：滤镜和参数入口，和苹果相机一样从顶部进入。
+    private var topActionButtons: some View {
+        VStack {
+            HStack {
+                Spacer()
+                VStack(spacing: 10) {
+                    topIconButton(
+                        systemImage: "camera.filters",
+                        isActive: viewModel.selectedPreset.id != FilterPreset.original.id,
+                        label: "滤镜"
+                    ) {
+                        viewModel.isFilterSheetPresented = true
+                    }
+
+                    topIconButton(
+                        systemImage: "slider.horizontal.3",
+                        isActive: !viewModel.adjustments.isNeutral,
+                        label: "调节"
+                    ) {
+                        viewModel.isAdjustSheetPresented = true
+                    }
+                }
+                .padding(.trailing, 16)
+            }
+            Spacer()
+        }
+        .padding(.top, 66)
+    }
+
+    private func topIconButton(
+        systemImage: String,
+        isActive: Bool,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: Theme.Font.iconBody, weight: .medium))
+                .foregroundStyle(isActive ? Color.black : Theme.control)
+                .frame(width: 42, height: 42)
+                .background(isActive ? Color.yellow : Theme.overlay, in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.16), lineWidth: 1))
+                .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
     /// 变焦档位：点数字直接切，长按打开弧形变焦盘。

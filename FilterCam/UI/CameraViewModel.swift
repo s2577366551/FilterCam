@@ -24,6 +24,8 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var adjustments: FilterAdjustments = .neutral
     @Published private(set) var thumbnails: [String: UIImage] = [:]
     @Published var isLibraryPresented = false
+    @Published var isFilterSheetPresented = false
+    @Published var isAdjustSheetPresented = false
     @Published private(set) var toast: String?
     @Published private(set) var hasReceivedFrame = false
     @Published private(set) var focusReticle: FocusReticle?
