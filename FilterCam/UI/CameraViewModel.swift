@@ -482,7 +482,8 @@ final class CameraViewModel: ObservableObject {
 
     /// 点击画面：在该点自动对焦并自动曝光。
     func focus(at viewPoint: CGPoint, in bounds: CGSize) {
-        guard !isManualFocusEnabled else { return }
+        // MF 模式下也允许点按对焦：点哪里就先自动对到哪里，
+        // 之后还能用 MF 滑杆手动微调。
         guard let devicePoint = devicePoint(from: viewPoint, in: bounds) else { return }
         showReticle(at: viewPoint, locked: false)
         Haptics.selection()
