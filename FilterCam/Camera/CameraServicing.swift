@@ -127,8 +127,12 @@ protocol CameraServicing: AnyObject {
 
     /// 当前是否为前后双摄（同时开启）模式。
     var isDualCamera: Bool { get }
+
+    /// 双摄模式下交换主画面和小窗：前摄变大画面、后摄变小窗，反之亦然。
+    func swapDualLayout()
 }
 
 extension CameraServicing {
     var isDualCamera: Bool { false }
+    func swapDualLayout() {}
 }

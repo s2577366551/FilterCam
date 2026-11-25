@@ -57,7 +57,14 @@ struct CameraScreen: View {
                     onResolution: { viewModel.togglePhotoResolution() },
                     onLivePhoto: { viewModel.toggleLivePhoto() },
                     onDual: { hideZoomDial(); viewModel.toggleDualCamera() },
-                    onFlip: { hideZoomDial(); viewModel.flipCamera() }
+                    onFlip: {
+                        hideZoomDial()
+                        if viewModel.isDualCameraEnabled {
+                            viewModel.swapDualCameras()
+                        } else {
+                            viewModel.flipCamera()
+                        }
+                    }
                 )
                 .padding(.top, 8)
 
@@ -490,6 +497,9 @@ struct CameraScreen: View {
                                 if pipDragStart == nil {
                                     pipDragStart = viewModel.pipCenter
                                 }
+                                // 轻微抖动不算拖动，避免点按换画面时小窗跟着晃。
+                                let moved = hypot(value.translation.width, value.translation.height)
+                                guard moved > 3 else { return }
                                 let content = viewModel.previewContentSize
                                 guard content.width > 0, content.height > 0 else { return }
                                 let scale = AspectFill.transform(
@@ -505,8 +515,13 @@ struct CameraScreen: View {
                                     )
                                 )
                             }
-                            .onEnded { _ in
+                            .onEnded { value in
                                 pipDragStart = nil
+                                // 几乎没移动就是点了一下：交换前后画面。
+                                let moved = hypot(value.translation.width, value.translation.height)
+                                if moved < 10 {
+                                    viewModel.swapDualCameras()
+                                }
                             }
                     )
             }

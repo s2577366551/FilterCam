@@ -36,6 +36,8 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var isLivePhotoEnabled = false
     @Published private(set) var captureMode: CaptureMode = .photo
     @Published private(set) var isDualCameraEnabled = false
+    /// 双摄时是否前摄为大画面（后摄变小窗）。
+    @Published private(set) var isDualFrontMain = false
     @Published private(set) var pipCenter = PiPLayout.defaultCenter
     @Published private(set) var isRecording = false
     @Published private(set) var recordingDuration: TimeInterval = 0
@@ -162,6 +164,7 @@ final class CameraViewModel: ObservableObject {
             singleCamera = camera
             if isDualCameraEnabled {
                 activeCamera = DualCameraService()
+                isDualFrontMain = false
             } else {
                 activeCamera = camera
             }
@@ -257,12 +260,14 @@ final class CameraViewModel: ObservableObject {
                 }
                 photoResolution = .standard
                 isManualFocusEnabled = false
+                isDualFrontMain = false
                 activeCamera = DualCameraService()
                 isDualCameraEnabled = true
                 movePiP(to: PiPLayout.defaultCenter)
             } else {
                 activeCamera = singleCamera
                 isDualCameraEnabled = false
+                isDualFrontMain = false
             }
 
             resetFrameState()
@@ -284,6 +289,19 @@ final class CameraViewModel: ObservableObject {
             }
             Haptics.selection()
         }
+    }
+
+    /// 点小窗：前后画面互换，前摄变大画面、后摄变小窗（再点换回来）。
+    func swapDualCameras() {
+        guard isDualCameraEnabled else { return }
+        guard let dual = activeCamera as? DualCameraService else { return }
+        dual.swapDualLayout()
+        isDualFrontMain.toggle()
+        // 换主摄像头后变焦要重新来，避免把后摄的倍率套到前摄上。
+        zoomFactor = 1
+        dual.setZoomFactor(1)
+        Haptics.selection()
+        showToast(isDualFrontMain ? "前置为主画面" : "后置为主画面")
     }
 
     /// 拖动前后双摄的小窗。center 是显示坐标系的归一化位置（原点左上）。
@@ -610,7 +628,8 @@ final class CameraViewModel: ObservableObject {
         let ny = min(max(inContent.y / content.height, 0), 1)
 
         // 预览由传感器画面顺时针旋转 90° 得到；前置摄像头额外做了水平镜像。
-        let u = isFrontCamera ? nx : 1 - nx
+        let usingFront = isFrontCamera || isDualFrontMain
+        let u = usingFront ? nx : 1 - nx
         return CGPoint(x: ny, y: u)
     }
 

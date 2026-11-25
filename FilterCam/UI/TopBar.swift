@@ -68,11 +68,11 @@ struct TopBar: View {
             iconButton(
                 systemImage: "arrow.triangle.2.circlepath.camera",
                 isActive: false,
-                label: "切换摄像头",
+                label: isDualCamera ? "交换前后画面" : "切换摄像头",
                 action: onFlip
             )
-            .opacity(isRecording || isDualCamera ? 0.4 : 1)
-            .disabled(isRecording || isDualCamera)
+            .opacity(isRecording ? 0.4 : 1)
+            .disabled(isRecording)
         }
         .padding(.horizontal, 14)
     }

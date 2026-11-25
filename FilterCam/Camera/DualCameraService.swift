@@ -66,6 +66,29 @@ final class DualCameraService: NSObject, CameraServicing {
 
     var isDualCamera: Bool { true }
 
+    /// 是否前摄为主画面（前摄大窗、后摄小窗）。默认后摄为主。
+    private var frontIsMain = false
+    private let layoutLock = NSLock()
+
+    private var isFrontMain: Bool {
+        layoutLock.lock()
+        defer { layoutLock.unlock() }
+        return frontIsMain
+    }
+
+    /// 当前主画面摄像头（对焦、变焦都作用在它上面）。
+    private var mainInput: AVCaptureDeviceInput? {
+        isFrontMain ? frontInput : backInput
+    }
+
+    func swapDualLayout() {
+        layoutLock.lock()
+        frontIsMain.toggle()
+        let nowFrontMain = frontIsMain
+        layoutLock.unlock()
+        CrashLogger.breadcrumb("双摄: 交换主画面，前摄为主=\(nowFrontMain)")
+    }
+
     // MARK: - 生命周期
 
     func start() async throws {
@@ -461,8 +484,10 @@ final class DualCameraService: NSObject, CameraServicing {
         // 只清状态，不删旧文件：上一段视频可能还在保存队列里。
         resetWriter(deleteFile: false)
 
+        let frontMain = isFrontMain
         frameLock.lock()
-        let size = latestBack?.extent.size ?? CGSize(width: 1080, height: 1920)
+        let mainImage = frontMain ? latestFront : latestBack
+        let size = mainImage?.extent.size ?? CGSize(width: 1080, height: 1920)
         frameLock.unlock()
         writerSize = CGSize(width: abs(size.width), height: abs(size.height))
 
@@ -643,7 +668,7 @@ final class DualCameraService: NSObject, CameraServicing {
         return settings
     }
 
-    // MARK: - 对焦（只作用在后摄）
+    // MARK: - 对焦（只作用在主画面）
 
     func focus(at devicePoint: CGPoint) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -659,7 +684,7 @@ final class DualCameraService: NSObject, CameraServicing {
     }
 
     private func applyFocus(at point: CGPoint) throws {
-        guard let device = backInput?.device else {
+        guard let device = mainInput?.device else {
             throw CameraError.configurationFailed("相机未就绪")
         }
         let clamped = CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
@@ -691,7 +716,7 @@ final class DualCameraService: NSObject, CameraServicing {
     }
 
     private func applyManualFocus(_ lensPosition: Float) throws {
-        guard let device = backInput?.device else {
+        guard let device = mainInput?.device else {
             throw CameraError.configurationFailed("相机未就绪")
         }
         guard device.isFocusModeSupported(.locked) else {
@@ -721,7 +746,7 @@ final class DualCameraService: NSObject, CameraServicing {
     }
 
     private func applyContinuousFocus() throws {
-        guard let device = backInput?.device else {
+        guard let device = mainInput?.device else {
             throw CameraError.configurationFailed("相机未就绪")
         }
         guard (try? device.lockForConfiguration()) != nil else {
@@ -736,10 +761,10 @@ final class DualCameraService: NSObject, CameraServicing {
         }
     }
 
-    // MARK: - 变焦（只作用于后摄主画面）
+    // MARK: - 变焦（只作用于主画面）
 
     var zoomRange: ClosedRange<CGFloat> {
-        guard let device = backInput?.device else { return 1...1 }
+        guard let device = mainInput?.device else { return 1...1 }
         return device.minAvailableVideoZoomFactor...device.maxAvailableVideoZoomFactor
     }
 
@@ -769,7 +794,7 @@ final class DualCameraService: NSObject, CameraServicing {
     }
 
     private func applyZoom(_ factor: CGFloat) {
-        guard let device = backInput?.device else { return }
+        guard let device = mainInput?.device else { return }
         guard (try? device.lockForConfiguration()) != nil else { return }
         defer { device.unlockForConfiguration() }
         let clamped = min(
@@ -926,6 +951,9 @@ extension DualCameraService: AVCaptureVideoDataOutputSampleBufferDelegate,
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let image = CIImage(cvPixelBuffer: buffer)
 
+        // 先读布局标记，避免和 frameLock 形成锁序反转。
+        let frontMain = isFrontMain
+
         frameLock.lock()
         if output === backVideoOutput {
             latestBack = image
@@ -936,11 +964,17 @@ extension DualCameraService: AVCaptureVideoDataOutputSampleBufferDelegate,
         let front = latestFront
         frameLock.unlock()
 
-        // 只跟随后摄的帧率合成，前摄帧只用来更新小窗。
-        guard output === backVideoOutput, let back else { return }
+        // 只有主画面的帧驱动合成，另一路只用来更新小窗。
+        let isMainOutput = frontMain ? (output === frontVideoOutput) : (output === backVideoOutput)
+        guard isMainOutput else { return }
+
+        let mainImage = frontMain ? front : back
+        let pipImage = frontMain ? back : front
+        guard let mainImage else { return }
+
         let composed = PiPComposer.compose(
-            back: back,
-            front: front,
+            back: mainImage,
+            front: pipImage,
             center: currentPiPCenter
         )
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
@@ -1004,26 +1038,29 @@ extension DualCameraService: AVCapturePhotoCaptureDelegate {
 
         guard let finished, let back, let front else { return }
 
-        let composed = Self.compose(back: back, front: front, center: currentPiPCenter)
+        let composed = composePhoto(back: back, front: front, center: currentPiPCenter)
         finished.resume(returning: composed)
     }
 
-    private static func compose(
+    private func composePhoto(
         back: CapturedPhoto,
         front: CapturedPhoto,
         center: CGPoint
     ) -> CapturedPhoto {
         let backImage = back.image.oriented(back.orientation)
         let frontImage = front.image.oriented(front.orientation)
+        let frontMain = isFrontMain
+        let mainImage = frontMain ? frontImage : backImage
+        let pipImage = frontMain ? backImage : frontImage
         let composed = PiPComposer.compose(
-            back: backImage,
-            front: frontImage,
+            back: mainImage,
+            front: pipImage,
             center: center
         )
         return CapturedPhoto(
             image: composed,
             orientation: .up,
-            metadata: back.metadata,
+            metadata: frontMain ? front.metadata : back.metadata,
             livePhotoMovieURL: nil
         )
     }
